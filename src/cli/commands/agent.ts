@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { AgentLoop } from '../../agent/loop';
+import { AgentLoop, ToolCallCallback, ToolResultCallback } from '../../agent/loop';
 import { loadConfig } from '../../config/manager';
 import { SessionManager } from '../../session/manager';
 import { LiteLLMProvider } from '../../provider/llm';
@@ -96,6 +96,8 @@ AgentCommand
                   console.log(chalk.green(`[You]: ${msg.content}`));
                 } else if (msg.role === 'assistant') {
                   console.log(chalk.blue(`[AI]: ${msg.content}`));
+                } else if (msg.role === 'tool') {
+                  console.log(chalk.magenta(`[Tool Result]: ${JSON.stringify(msg.content)}`));
                 }
               });
               break;
@@ -129,6 +131,30 @@ AgentCommand
         });
         spinner.start();
 
+        // 定义工具调用回调函数
+        const handleToolCall: ToolCallCallback = (toolName, args) => {
+          if (spinner.isSpinning) {
+            spinner.stop();
+          }
+          console.log(chalk.yellow(`\n🔧 [Tool Call]: ${toolName}(${JSON.stringify(args)})`));
+          
+          // 更新加载指示器以显示正在执行工具
+          spinner.text = chalk.gray(`Executing ${toolName}...`);
+          spinner.start();
+        };
+
+        // 定义工具结果回调函数
+        const handleToolResult: ToolResultCallback = (toolName, result) => {
+          if (spinner.isSpinning) {
+            spinner.stop();
+          }
+          console.log(chalk.magenta(`\n💾 [Tool Result]: ${JSON.stringify(result)}`));
+          
+          // 更新加载指示器以显示正在思考下一步
+          spinner.text = chalk.gray('Processing tool result...');
+          spinner.start();
+        };
+
         // 定义流式数据回调函数，用于实时显示 AI 响应
         let aiResponse = '';
         const handleStreamData = (data: string) => {
@@ -140,7 +166,7 @@ AgentCommand
         };
 
         try {
-          await agentLoop.msgHandler(trimmedInput, handleStreamData);
+          await agentLoop.msgHandler(trimmedInput, handleStreamData, handleToolCall, handleToolResult);
 
           // 确保加载指示器停止
           if (spinner.isSpinning) {

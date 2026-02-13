@@ -131,7 +131,7 @@ export class ToolExecutor {
     try {
       const { success, ...rest } = await tool.execute(argumentsObj, this.workspace);
       return {
-        result: Object.entries(rest)[0] ? Object.entries(rest)[0][1] : 'suc',
+        result: Object.entries(rest)[0] ? this.formatToolOutput(Object.entries(rest)[0][1]) : 'suc',
         tool_call_id: providedId || `call_${uuidv4()}`
       };
     } catch (error) {
@@ -173,5 +173,21 @@ export class ToolExecutor {
     );
 
     return results;
+  }
+
+  formatToolOutput(output: unknown): string {
+    if (output === null || output === undefined) {
+      return '';
+    }
+
+    if (typeof output === 'string') {
+      return output;
+    }
+
+    if (typeof output === 'object') {
+      return JSON.stringify(output, null, 2);
+    }
+
+    return String(output);
   }
 }

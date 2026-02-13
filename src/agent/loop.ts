@@ -4,6 +4,10 @@ import { ContextMng } from "./context";
 import { Session } from "../session/manager";
 import { ToolExecutor } from "../tools/ToolExecutor";
 
+// 定义工具调用回调类型
+export type ToolCallCallback = (toolName: string, args: any) => void;
+export type ToolResultCallback = (toolName: string, result: any) => void;
+
 interface Options {
     session: Session,
     ctx: ContextMng,
@@ -34,7 +38,12 @@ export class AgentLoop {
         this.toolExecutor = toolExecutor
     }
 
-    async msgHandler(msg: string, onStreamData?: (data: string) => void) {
+    async msgHandler(
+        msg: string,
+        onStreamData?: (data: string) => void,
+        onToolCall?: ToolCallCallback,
+        onToolResult?: ToolResultCallback
+    ) {
         this.session.addMessage('user', msg)
 
         // 构建上下文
@@ -57,6 +66,19 @@ export class AgentLoop {
         const toolCalls = result?.choices?.[0]?.message?.tool_calls;
 
         if (toolCalls && toolCalls.length > 0) {
+            // 通知UI有工具调用发生
+            for (const toolCall of toolCalls) {
+                if (onToolCall) {
+                    try {
+                        const args = JSON.parse(toolCall.function.arguments);
+                        onToolCall(toolCall.function.name, args);
+                    } catch (e) {
+                        console.error('解析工具参数失败:', e);
+                        if (onToolCall) onToolCall(toolCall.function.name, {});
+                    }
+                }
+            }
+
             // 执行所有工具调用，保留AI提供的ID
             const toolResults = await this.toolExecutor.executeTools(
                 toolCalls.map(call => ({
@@ -66,10 +88,21 @@ export class AgentLoop {
                 }))
             );
 
+            // 通知UI工具执行结果
+            for (const toolResult of toolResults) {
+                if (onToolResult) {
+                    onToolResult(toolResult.name, toolResult.result);
+                }
+            }
+
             // 将工具调用结果添加到消息历史中
             const { content, tool_calls } = result?.choices?.[0]?.message
+            let init = false
             for (const toolResult of toolResults) {
-                this.session.addMessage('assistant', content, tool_calls)
+                if (!init) {
+                    this.session.addMessage('assistant', content, tool_calls)
+                    init = true
+                }
                 this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id);
             }
 

@@ -40,7 +40,7 @@ export class LiteLLMProvider extends LLMProvider {
                 body: JSON.stringify(requestBody)
             };
 
-            console.log(options)
+            // console.log(options)
             const response = await fetch(baseURL, options);
             if (!response.ok) {
                 // 尝试获取响应体内容作为错误信息
