@@ -6,11 +6,20 @@ export interface Message {
     role: Role;
     content: string;
     timestamp: string;
+    tool_calls: any;
 }
+
+export interface ToolMessage {
+    role: 'tool';
+    content: string;
+    tool_call_id: string;
+}
+
+export type SessionMessage = Message | ToolMessage;
 
 export class Session {
     key: string;
-    messages: Message[] = [];
+    messages: SessionMessage[] = [];
     updatedAt: Date;
 
     constructor(public id: string) {
@@ -18,12 +27,42 @@ export class Session {
         this.updatedAt = new Date();
     }
 
-    addMessage(role: Role, content: string) {
-        this.messages.push({
-            role,
-            content,
-            timestamp: new Date().toISOString(),
-        });
+    addMessage(role: 'tool', content: string, tool_call_id: string): void;
+    addMessage(role: 'assistant', content: string, tool_calls: any): void;
+    addMessage(role: Exclude<Role, 'tool'>, content: string): void;
+    addMessage(role: Role, content: string, tool_call_id?: string) {
+        if (role === 'tool') {
+            if (!tool_call_id) {
+                throw new Error('Tool messages require a tool_call_id');
+            }
+
+            const toolMessage: ToolMessage = {
+                role,
+                content,
+                tool_call_id
+            };
+
+            this.messages.push(toolMessage);
+        } else if (role === 'assistant' && tool_call_id) {
+            const message: Message = {
+                role,
+                content,
+                tool_calls: tool_call_id,
+                timestamp: new Date().toISOString(),
+            };
+
+            this.messages.push(message);
+        }
+        else {
+            const message: Message = {
+                role,
+                content,
+                timestamp: new Date().toISOString(),
+            };
+
+            this.messages.push(message);
+        }
+
         this.updatedAt = new Date();
     }
 

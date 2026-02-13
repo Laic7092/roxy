@@ -7,6 +7,7 @@ import { ContextMng } from '../../agent/context';
 import chalk from 'chalk';
 import readline from 'readline';
 import ora from 'ora';
+import { ToolExecutor } from '../../tools/ToolExecutor';
 
 export const AgentCommand = new Command('agent');
 
@@ -45,12 +46,14 @@ AgentCommand
         console.log(chalk.yellow('🗑️  Session history cleared'));
       }
 
+      const toolExecutor = new ToolExecutor(workspace)
       // 初始化 AgentLoop 并传入会话
       const agentLoop = new AgentLoop({
         session,
         provider,
         ctx,
-        model: curModel
+        model: curModel,
+        toolExecutor
       });
 
       console.log(chalk.green(`💬 Entering interactive mode (session: ${sessionId})`));
