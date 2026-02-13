@@ -1,0 +1,38 @@
+{
+  "name": "roxy",
+  "version": "1.0.0",
+  "description": "AI Assistant",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "roxy": "./dist/cli/index.mjs"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "build": "tsdown",
+    "dev": "node --loader ts-node/esm",
+    "test": "vitest run",
+    "test:ui": "vitest --ui",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "ai",
+    "assistant",
+    "cli"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.29.2",
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "oxlint": "^1.46.0",
+    "tsdown": "^0.20.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "mitt": "^3.0.1",
+    "which": "^6.0.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "module": "preserve",
+        "moduleResolution": "bundler",
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
+        "types": [
+            "node"
+        ],
+    },
+    "include": [
+        "src/**/*",
+        "src/types/**/*.d.ts"
+    ]
+}
