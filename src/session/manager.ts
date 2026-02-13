@@ -42,7 +42,7 @@ export class SessionManager {
     private dir: string;
 
     constructor(sessionDir?: string) {
-        this.dir = sessionDir || join(require('os').homedir(), '.nanobot', 'sessions');
+        this.dir = sessionDir || join(require('os').homedir(), '.roxy', 'sessions');
     }
 
     private async ensureDir() {
