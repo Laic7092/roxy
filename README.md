@@ -1,6 +1,6 @@
-# Roxy CLI
+# Roxy
 
-Roxy 是一个 AI 助手 CLI 工具，提供便捷的命令行界面来与 AI 模型交互。
+Roxy 是一个 AI 助手
 
 ## 安装
 

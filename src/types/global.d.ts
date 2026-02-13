@@ -8,6 +8,8 @@ interface Message {
 interface Ctx {
     model: string;
     messages: Message[]
+    stream?: boolean;
+    onStreamData?: (data: string) => void;
     tools?: Tool[]
     tool_choice?: 'none' | 'auto' | 'required'
 }
