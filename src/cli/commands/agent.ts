@@ -63,7 +63,7 @@ AgentCommand
 
       showPrompt(); // 显示初始提示符
 
-      process.stdin.on('readable', () => {
+      process.stdin.on('readable', async () => {
         let chunk;
         while ((chunk = process.stdin.read()) !== null) {
           const input = chunk.toString().trim();
@@ -82,7 +82,13 @@ AgentCommand
 
           // 将用户输入发送给 agent
           console.log(`\n[You]: ${input}`);
-          agentLoop.msgHandler(input);
+          
+          // 定义流式数据回调函数，用于实时显示 AI 响应
+          const handleStreamData = (data: string) => {
+            process.stdout.write(data);
+          };
+          
+          await agentLoop.msgHandler(input, handleStreamData);
 
           sessionManager.save(session)
           // 显示提示符等待下一个输入
