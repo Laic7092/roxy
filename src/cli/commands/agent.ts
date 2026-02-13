@@ -138,40 +138,35 @@ AgentCommand
 
         try {
           await agentLoop.msgHandler(trimmedInput, handleStreamData);
-          
+
           // 确保加载指示器停止
           if (spinner.isSpinning) {
             spinner.stop();
           }
-          
+
           // 添加换行以分隔响应和提示符
           console.log('');
-
-          // 将AI响应添加到会话中（如果尚未添加）
-          if (aiResponse.trim()) {
-            session.addMessage('assistant', aiResponse);
-          }
         } catch (error) {
           // 确保加载指示器停止
           if (spinner.isSpinning) {
             spinner.stop();
           }
-          
+
           console.error(chalk.red('\n❌ Error processing your request:'), error.message);
-          
+
           // 提供重试选项
           const retry = await new Promise((resolve) => {
             const retryRl = readline.createInterface({
               input: process.stdin,
               output: process.stdout
             });
-            
+
             retryRl.question(chalk.yellow('\n🔄 Retry? (y/n): '), (answer) => {
               retryRl.close();
               resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
             });
           });
-          
+
           if (retry) {
             // 递归调用自身以重试
             rl.emit('line', input);
