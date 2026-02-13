@@ -1,15 +1,18 @@
+import { readFileSync } from "fs"
 import { Memory } from "./memory"
 import { SkillsLoader } from "./skill"
+import { join } from "path"
 
 export class ContextMng {
-    systemPrompt: string = 'you are a helpful AI Assist'
+    systemPrompt: string
     tools: Tool[]
     skills: []
     _sys_msg: Message[]
     constructor({
         workspace
     }) {
-        const memo = new Memory()
+        this.loadAgentPrompt(workspace)
+        const memo = new Memory(workspace)
         const skillsLoader = new SkillsLoader(workspace)
 
         const _sys_msg = [
@@ -29,6 +32,11 @@ export class ContextMng {
             })
         })
         this._sys_msg = _sys_msg as Message[]
+    }
+
+    loadAgentPrompt(workspace) {
+        const paths = ['AGENT.md', 'SOUL.md', 'USER.md'].map(filename => join(workspace, filename))
+        this.systemPrompt = paths.map(path => readFileSync(path, 'utf-8')).join('\n')
     }
 
     buildContext(messages: Message[]) {
