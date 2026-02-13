@@ -1,5 +1,10 @@
-import { readFile, writeFile, listDir, getWorkspace } from './FileSystemTools';
+import { kMaxLength } from 'buffer';
+import { readdir, stat } from 'fs/promises';
+import { join, extname, basename, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface ToolFunction {
   name: string;
@@ -18,84 +23,91 @@ export class ToolExecutor {
 
   constructor(workspace: string) {
     this.workspace = workspace;
-    this.registerDefaultTools();
+    // 异步初始化工具注册，不阻塞构造函数
+    this.initializeTools(__dirname);
   }
 
-  private registerDefaultTools() {
-    // 注册文件读取工具
-    this.tools.set('readFile', {
-      name: 'readFile',
-      description: 'Read content from a file in the workspace',
-      parameters: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to read (relative to workspace)'
-          }
-        },
-        required: ['filePath']
-      },
-      execute: async (args: { filePath: string }, workspace: string) => {
-        return await readFile(args.filePath, workspace);
-      }
-    });
+  /**
+   * 初始化工具注册
+   */
+  private async initializeTools(toolsDir: string) {
+    await this.autoRegisterTools(toolsDir);
+    console.log(`\n✅ ToolExecutor initialized with ${this.tools.size} tools: ${Array.from(this.tools).map(([k, v]) => k)}`);
+  }
 
-    // 注册文件写入工具
-    this.tools.set('writeFile', {
-      name: 'writeFile',
-      description: 'Write content to a file in the workspace',
-      parameters: {
-        type: 'object',
-        properties: {
-          filePath: {
-            type: 'string',
-            description: 'Path to the file to write (relative to workspace)'
-          },
-          content: {
-            type: 'string',
-            description: 'Content to write to the file'
-          }
-        },
-        required: ['filePath', 'content']
-      },
-      execute: async (args: { filePath: string; content: string }, workspace: string) => {
-        return await writeFile(args.filePath, args.content, workspace);
-      }
-    });
+  /**
+   * 自动扫描并注册工具目录下的所有工具
+   */
+  async autoRegisterTools(toolsDir: string) {
+    try {
+      const files = await readdir(toolsDir);
 
-    // 注册列出目录内容工具
-    this.tools.set('listDir', {
-      name: 'listDir',
-      description: 'List contents of a directory in the workspace',
-      parameters: {
-        type: 'object',
-        properties: {
-          dirPath: {
-            type: 'string',
-            description: 'Path to the directory to list (relative to workspace, optional, defaults to workspace root)'
-          }
-        },
-        required: []
-      },
-      execute: async (args: { dirPath?: string }, workspace: string) => {
-        return await listDir(args.dirPath || '.', workspace);
-      }
-    });
+      for (const file of files) {
+        const filePath = join(toolsDir, file);
+        const stats = await stat(filePath);
 
-    // 注册获取工作空间路径工具
-    this.tools.set('getWorkspace', {
-      name: 'getWorkspace',
-      description: 'Get the current workspace path',
-      parameters: {
-        type: 'object',
-        properties: {},
-        required: []
-      },
-      execute: async (_, workspace: string) => {
-        return { success: true, workspace: getWorkspace(workspace) };
+        if (stats.isDirectory()) {
+          // 递归扫描子目录
+          await this.autoRegisterTools(filePath);
+        } else if (stats.isFile() && (extname(file) === '.ts' || extname(file) === '.js' || extname(file) === '.mjs' || extname(file) === '.cjs')) {
+          // 跳过自身和其他非工具文件
+          if (basename(file, extname(file)) !== 'ToolExecutor' &&
+            basename(file, extname(file)) !== 'index' &&
+            basename(file, extname(file)) !== 'ToolRegistry' &&
+            basename(file, extname(file)) !== 'ToolRegistrar') {
+
+            try {
+              // 动态导入工具文件
+              const module = await import(`file://${filePath}`);
+
+              // 查找导出的工具函数
+              for (const key in module) {
+                const exportedItem = module[key];
+
+                // 检查是否为工具函数格式
+                if (this.isToolFunctionFormat(exportedItem)) {
+                  if (this.tools.has(exportedItem.name)) {
+                    console.warn(`Tool ${exportedItem.name} is already registered and will be overwritten.`);
+                  }
+                  this.tools.set(exportedItem.name, exportedItem);
+                  // console.log(`Registered tool: ${exportedItem.name}`);
+                }
+
+                // 检查是否为工具数组
+                if (Array.isArray(exportedItem) && exportedItem.length > 0) {
+                  for (const tool of exportedItem) {
+                    if (this.isToolFunctionFormat(tool)) {
+                      if (this.tools.has(tool.name)) {
+                        console.warn(`Tool ${tool.name} is already registered and will be overwritten.`);
+                      }
+                      this.tools.set(tool.name, tool);
+                      // console.log(`Registered tool: ${tool.name}`);
+                    }
+                  }
+                }
+              }
+            } catch (importError) {
+              console.error(`Error importing tool file ${filePath}:`, importError);
+            }
+          }
+        }
       }
-    });
+    } catch (error) {
+      console.error('Error auto-registering tools:', error);
+    }
+  }
+
+  /**
+   * 检查对象是否符合工具函数格式
+   */
+  private isToolFunctionFormat(obj: any): obj is ToolFunction {
+    return (
+      obj &&
+      typeof obj.name === 'string' &&
+      typeof obj.description === 'string' &&
+      obj.parameters &&
+      typeof obj.execute === 'function'
+    );
   }
 
   /**
@@ -115,7 +127,7 @@ export class ToolExecutor {
   /**
    * 执行指定的工具
    * @param toolName 工具名称
-   * @param arguments 参数
+   * @param argumentsObj 参数对象
    * @param providedId 如果AI提供了ID则使用该ID，否则生成新ID
    */
   async executeTool(toolName: string, argumentsObj: any, providedId?: string): Promise<{ result: any; tool_call_id: string }> {
@@ -131,7 +143,7 @@ export class ToolExecutor {
     try {
       const { success, ...rest } = await tool.execute(argumentsObj, this.workspace);
       return {
-        result: Object.entries(rest)[0] ? this.formatToolOutput(Object.entries(rest)[0][1]) : 'suc',
+        result: Object.entries(rest)[0] ? this.formatToolOutput(Object.entries(rest)[0][1]) : 'success',
         tool_call_id: providedId || `call_${uuidv4()}`
       };
     } catch (error) {
@@ -189,5 +201,28 @@ export class ToolExecutor {
     }
 
     return String(output);
+  }
+
+  /**
+   * 注册新工具
+   * @param toolDefinition 工具定义
+   * @returns 是否注册成功
+   */
+  registerTool(toolDefinition: ToolFunction): boolean {
+    if (this.tools.has(toolDefinition.name)) {
+      console.warn(`Tool ${toolDefinition.name} is already registered and will be overwritten.`);
+    }
+
+    this.tools.set(toolDefinition.name, toolDefinition);
+    return true;
+  }
+
+  /**
+   * 注销工具
+   * @param toolName 工具名称
+   * @returns 是否注销成功
+   */
+  unregisterTool(toolName: string): boolean {
+    return this.tools.delete(toolName);
   }
 }
