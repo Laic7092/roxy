@@ -31,9 +31,7 @@ AgentCommand
         model: curModel
       })
 
-      const ctx = new ContextMng({
-        workspace,
-      })
+      const ctx = new ContextMng(workspace)
 
       // 初始化会话管理器和指定会话
       const sessionManager = new SessionManager();
@@ -137,7 +135,7 @@ AgentCommand
             spinner.stop();
           }
           console.log(chalk.yellow(`\n🔧 [Tool Call]: ${toolName}(${JSON.stringify(args)})`));
-          
+
           // 更新加载指示器以显示正在执行工具
           spinner.text = chalk.gray(`Executing ${toolName}...`);
           spinner.start();
@@ -149,7 +147,7 @@ AgentCommand
             spinner.stop();
           }
           console.log(chalk.magenta(`\n💾 [Tool Result]: ${JSON.stringify(result)}`));
-          
+
           // 更新加载指示器以显示正在思考下一步
           spinner.text = chalk.gray('Processing tool result...');
           spinner.start();
