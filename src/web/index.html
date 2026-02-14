@@ -51,10 +51,31 @@
             padding: 0.5rem;
             cursor: pointer;
             border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .history-item:hover {
             background-color: #f0f0f0;
+        }
+
+        .history-item.active {
+            background-color: #d6eaf8;
+            font-weight: bold;
+        }
+
+        .delete-session-btn {
+            background: none;
+            border: none;
+            color: #e74c3c;
+            cursor: pointer;
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+
+        .delete-session-btn:hover {
+            opacity: 1;
         }
 
         .new-chat-btn {
@@ -90,6 +111,7 @@
             padding: 0.75rem;
             border-radius: 8px;
             line-height: 1.4;
+            white-space: pre-line;
         }
 
         .user-message {
@@ -154,11 +176,11 @@
         <div class="sidebar">
             <div class="chat-history">
                 <h3>Chat History</h3>
-                <div class="history-item">Today's Chat</div>
-                <div class="history-item">Project Discussion</div>
-                <div class="history-item">Research Notes</div>
+                <div id="sessions-list">
+                    <!-- Sessions will be populated dynamically -->
+                </div>
             </div>
-            <button class="new-chat-btn">New Chat</button>
+            <button id="new-chat-button" class="new-chat-btn">New Chat</button>
         </div>
 
         <div class="main-content">
@@ -180,6 +202,11 @@
         const chatMessages = document.getElementById('chat-messages');
         const messageInput = document.getElementById('message-input');
         const sendButton = document.getElementById('send-button');
+        const sessionsList = document.getElementById('sessions-list');
+        const newChatButton = document.getElementById('new-chat-button');
+
+        // Track current session
+        let currentSessionId = null;
 
         // Send message function
         function sendMessage() {
@@ -229,6 +256,54 @@
             return typingDiv;
         }
 
+        // Render sessions list
+        function renderSessions(sessions) {
+            // sessionsList.innerHTML = '';
+
+            sessions.forEach(session => {
+                const sessionElement = document.createElement('div');
+                sessionElement.className = 'history-item';
+                if (session.id === currentSessionId) {
+                    sessionElement.classList.add('active');
+                }
+
+                sessionElement.innerHTML = `
+                    <span class="session-name">${session.name || session.id}</span>
+                    <button class="delete-session-btn" data-session-id="${session.id}">✕</button>
+                `;
+
+                // Add click event to switch session
+                sessionElement.querySelector('.session-name').addEventListener('click', () => {
+                    switchSession(session.id);
+                });
+
+                // Add click event to delete session
+                sessionElement.querySelector('.delete-session-btn').addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent switching session when clicking delete
+                    deleteSession(session.id);
+                });
+
+                sessionsList.appendChild(sessionElement);
+            });
+        }
+
+        // Switch to a different session
+        function switchSession(sessionId) {
+            ws.send(JSON.stringify({ type: 'switch_session', sessionId }));
+        }
+
+        // Create a new session
+        function createNewSession() {
+            ws.send(JSON.stringify({ type: 'create_session' }));
+        }
+
+        // Delete a session
+        function deleteSession(sessionId) {
+            if (confirm('Are you sure you want to delete this session?')) {
+                ws.send(JSON.stringify({ type: 'delete_session', sessionId }));
+            }
+        }
+
         // Event listeners
         sendButton.addEventListener('click', sendMessage);
 
@@ -239,10 +314,13 @@
             }
         });
 
+        newChatButton.addEventListener('click', createNewSession);
+
         // WebSocket event handlers
         ws.onopen = () => {
             console.log('Connected to Roxy server');
-            addMessageToChat('assistant', 'Hello! I\'m Roxy, your AI assistant. How can I help you today?');
+            // Request sessions list when connected
+            ws.send(JSON.stringify({ type: 'get_sessions' }));
         };
 
         ws.onmessage = (event) => {
@@ -289,6 +367,42 @@
 
                 case 'error':
                     addMessageToChat('assistant', `Error: ${data.content}`);
+                    break;
+
+                case 'sessions_list':
+                    // Update the sessions list in the UI
+                    renderSessions(data.sessions);
+                    break;
+
+                case 'session_switched':
+                    // Update current session ID
+                    currentSessionId = data.sessionId;
+                    // Refresh the sessions list to update active state
+                    renderSessions(data.sessions || []);
+                    // Optionally clear chat and load new session history
+                    chatMessages.innerHTML = '';
+                    break;
+
+                case 'session_created':
+                    // Update current session ID
+                    currentSessionId = data.sessionId;
+                    // Refresh the sessions list
+                    ws.send(JSON.stringify({ type: 'get_sessions' }));
+                    // Clear chat for new session
+                    chatMessages.innerHTML = '';
+                    break;
+
+                case 'session_deleted':
+                    // Refresh the sessions list after deletion
+                    ws.send(JSON.stringify({ type: 'get_sessions' }));
+                    break;
+
+                case 'session_history':
+                    // Load session history into chat
+                    chatMessages.innerHTML = '';
+                    data.history.forEach(msg => {
+                        addMessageToChat(msg.role, msg.content);
+                    });
                     break;
 
                 default:
