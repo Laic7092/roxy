@@ -21,7 +21,7 @@ WebCommand
 
       // 准备环境变量和参数
       const env = { ...process.env };
-      
+
       // 设置端口和主机作为环境变量
       env.PORT = options.port;
       env.HOST = options.host;
@@ -52,6 +52,7 @@ WebCommand
         serverProcess.kill('SIGINT');
       });
 
+      options.open = false
       // 如果需要，自动打开浏览器
       if (options.open) {
         setTimeout(() => {
