@@ -13,7 +13,8 @@
     "dev": "node --loader ts-node/esm",
     "test": "vitest run",
     "test:ui": "vitest --ui",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "web": "node dist/web/server.mjs"
   },
   "keywords": [
     "ai",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^25.2.3",
     "@types/uuid": "^11.0.0",
+    "@types/ws": "^8.18.1",
     "oxlint": "^1.46.0",
     "tsdown": "^0.20.3",
     "typescript": "^5.9.3",
@@ -37,6 +39,7 @@
     "mitt": "^3.0.1",
     "ora": "^9.3.0",
     "uuid": "^13.0.0",
-    "which": "^6.0.1"
+    "which": "^6.0.1",
+    "ws": "^8.19.0"
   }
 }

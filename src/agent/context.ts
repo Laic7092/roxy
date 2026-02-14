@@ -7,9 +7,8 @@ import { Message, ToolMessage } from "../session/manager"
 export class ContextMng {
     skills: []
     _sys_msg: Message[]
-    constructor({
-        workspace
-    }) {
+    workspace: string
+    constructor(workspace: string) {
 
         const memo = new Memory(workspace)
         const skillsLoader = new SkillsLoader(workspace)
@@ -31,6 +30,7 @@ export class ContextMng {
             })
         })
         this._sys_msg = _sys_msg as Message[]
+        this.workspace = workspace
     }
 
     loadAgentPrompt(workspace) {

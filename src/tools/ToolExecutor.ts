@@ -32,7 +32,6 @@ export class ToolExecutor {
    */
   private async initializeTools(toolsDir: string) {
     await this.autoRegisterTools(toolsDir);
-    console.log(`\n✅ ToolExecutor initialized with ${this.tools.size} tools: ${Array.from(this.tools).map(([k, v]) => k)}`);
   }
 
   /**
@@ -70,7 +69,6 @@ export class ToolExecutor {
                     console.warn(`Tool ${exportedItem.name} is already registered and will be overwritten.`);
                   }
                   this.tools.set(exportedItem.name, exportedItem);
-                  // console.log(`Registered tool: ${exportedItem.name}`);
                 }
 
                 // 检查是否为工具数组
@@ -81,7 +79,6 @@ export class ToolExecutor {
                         console.warn(`Tool ${tool.name} is already registered and will be overwritten.`);
                       }
                       this.tools.set(tool.name, tool);
-                      // console.log(`Registered tool: ${tool.name}`);
                     }
                   }
                 }
