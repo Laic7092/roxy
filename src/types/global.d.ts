@@ -3,6 +3,7 @@ type Role = 'system' | 'user' | 'assistant' | 'tool'
 interface Message {
   role: Role
   content: string | null
+  tool_calls?: ToolCall[]
 }
 
 interface ToolCall {
