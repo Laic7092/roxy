@@ -17,7 +17,7 @@ describe('SessionManager', () => {
     try {
       await rm(testSessionDir, { recursive: true, force: true })
     } catch (err) {
-      // 忽略清理错误
+      console.error(err)
     }
   })
 

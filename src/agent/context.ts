@@ -1,43 +1,69 @@
-import { readFileSync } from 'fs'
+import { readFile } from 'fs/promises'
 import { Memory } from './memory'
 import { SkillsLoader } from './skill'
 import { join } from 'path'
-import { Message, ToolMessage } from '../session/manager'
+import type { Message, ToolMessage } from '../session/manager'
 
 export class ContextMng {
-  skills: []
-  _sys_msg: Message[]
+  private sysMsgPromise: Promise<Message[]> // 异步加载系统消息
   workspace: string
-  constructor(workspace: string) {
-    const memo = new Memory(workspace)
-    const skillsLoader = new SkillsLoader(workspace)
 
-    const _sys_msg = [
+  constructor(workspace: string) {
+    this.workspace = workspace
+    // 在构造函数中启动异步加载过程
+    this.sysMsgPromise = this.loadSystemMessages()
+  }
+
+  private async loadSystemMessages(): Promise<Message[]> {
+    // 创建Memory实例并异步获取记忆
+    const memory = new Memory(this.workspace)
+    const memoryContent = await memory.getMemory()
+
+    // 创建SkillsLoader实例并异步获取技能
+    const skillsLoader = new SkillsLoader(this.workspace)
+    const skills = await skillsLoader.getAvailableSkills()
+
+    // 异步加载代理提示
+    const agentPrompt = await this.loadAgentPrompt(this.workspace)
+
+    const _sys_msg: Message[] = [
       {
         role: 'system',
-        content: this.loadAgentPrompt(workspace),
+        content: agentPrompt,
       },
       {
         role: 'system',
-        content: memo.getMemory(),
+        content: memoryContent,
       },
     ]
-    skillsLoader.getAvailableSkills().then((skills) => {
-      _sys_msg.push({
-        role: 'system',
-        content: '# SKILLS' + skills.join('\n'),
-      })
+
+    _sys_msg.push({
+      role: 'system',
+      content: '# SKILLS' + skills.join('\n'),
     })
-    this._sys_msg = _sys_msg as Message[]
-    this.workspace = workspace
+
+    return _sys_msg
   }
 
-  loadAgentPrompt(workspace) {
+  async loadAgentPrompt(workspace: string): Promise<string> {
     const paths = ['AGENT.md', 'SOUL.md', 'USER.md'].map((filename) => join(workspace, filename))
-    return paths.map((path) => readFileSync(path, 'utf-8')).join('\n')
+    const contents = await Promise.all(
+      paths.map(async (path) => {
+        try {
+          return await readFile(path, 'utf-8')
+        } catch (error) {
+          console.error(error)
+          console.warn(`Warning: Could not read ${path}, skipping...`)
+          return ''
+        }
+      }),
+    )
+    return contents.join('\n')
   }
 
-  buildContext(messages: (Message | ToolMessage)[]) {
-    return [...this._sys_msg, ...messages]
+  // 异步构建上下文
+  async buildContext(messages: (Message | ToolMessage)[]): Promise<(Message | ToolMessage)[]> {
+    const sysMsgs = await this.sysMsgPromise
+    return [...sysMsgs, ...messages]
   }
 }

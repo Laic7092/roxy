@@ -1,4 +1,3 @@
-import { kMaxLength } from 'buffer'
 import { readdir, stat } from 'fs/promises'
 import { join, extname, basename, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -20,11 +19,12 @@ export interface ToolFunction {
 export class ToolExecutor {
   private tools: Map<string, ToolFunction> = new Map()
   private workspace: string
+  private initializationPromise: Promise<void>
 
   constructor(workspace: string) {
     this.workspace = workspace
-    // 异步初始化工具注册，不阻塞构造函数
-    this.initializeTools(__dirname)
+    // 初始化工具注册，并保存Promise以供后续等待
+    this.initializationPromise = this.initializeTools(__dirname)
   }
 
   /**
@@ -121,7 +121,9 @@ export class ToolExecutor {
   /**
    * 获取所有可用工具的定义
    */
-  getToolDefinitions(): any[] {
+  async getToolDefinitions(): Promise<any[]> {
+    // 等待初始化完成
+    await this.initializationPromise
     return Array.from(this.tools.values()).map((tool) => ({
       type: 'function',
       function: {
@@ -143,6 +145,9 @@ export class ToolExecutor {
     argumentsObj: any,
     providedId?: string,
   ): Promise<{ result: any; tool_call_id: string }> {
+    // 等待初始化完成
+    await this.initializationPromise
+
     const tool = this.tools.get(toolName)
 
     if (!tool) {
@@ -179,6 +184,9 @@ export class ToolExecutor {
       name: string
     }>
   > {
+    // 等待初始化完成
+    await this.initializationPromise
+
     const results = await Promise.all(
       toolCalls.map(async ({ name, arguments: argsStr, id }) => {
         try {

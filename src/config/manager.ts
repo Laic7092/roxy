@@ -1,7 +1,7 @@
-import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { writeFile, mkdir, readFile, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { constants } from 'node:fs'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
@@ -39,9 +39,12 @@ export async function initConfig() {
     const configPath = join(mainDir, 'config.json')
 
     // 检查配置文件是否已存在
-    if (existsSync(configPath)) {
+    try {
+      await access(configPath, constants.F_OK)
       console.log(`ℹ️ 配置文件已存在: ${configPath}`)
       return configPath
+    } catch {
+      // 配置文件不存在，继续创建
     }
 
     // 写入配置文件
@@ -304,19 +307,25 @@ As Roxy, I am your intelligent AI assistant designed to facilitate productive co
     const filePath = join(workspaceDir, file.name)
 
     // 检查文件是否已存在
-    if (!existsSync(filePath)) {
+    try {
+      await access(filePath, constants.F_OK)
+      console.log(`ℹ️  文件已存在: ${filePath}`)
+    } catch {
+      // 文件不存在，创建它
       await writeFile(filePath, file.content, 'utf-8')
       console.log(`✅ 已创建: ${filePath}`)
-    } else {
-      console.log(`ℹ️  文件已存在: ${filePath}`)
     }
   }
 }
 
-export function loadConfig(): Config {
-  if (!existsSync(CONFIG_PATH)) {
-    throw new Error(`配置文件不存在: ${CONFIG_PATH}`)
+export async function loadConfig(): Promise<Config> {
+  try {
+    const data = await readFile(CONFIG_PATH, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`配置文件不存在: ${CONFIG_PATH}`)
+    }
+    throw error
   }
-  const data = readFileSync(CONFIG_PATH, 'utf-8')
-  return JSON.parse(data)
 }

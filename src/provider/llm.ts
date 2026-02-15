@@ -67,8 +67,6 @@ export class LiteLLMProvider extends LLMProvider {
         let buffer = ''
         let fullContent = ''
         let toolCalls: any[] = [] // 存储工具调用
-        let currentToolCallIndex: number | null = null
-        let currentProperty: string | null = null
 
         while (true) {
           const { done, value } = await reader.read()

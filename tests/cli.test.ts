@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { spawn } from 'child_process'
-import { promisify } from 'util'
 
 // 将 spawn 包装成 promise 版本
 function runCliCommand(

@@ -14,12 +14,13 @@ export const AgentCommand = new Command('agent')
 AgentCommand.description('Start an interactive conversation with the AI agent')
   .option('-s, --session <sessionId>', 'Specify session ID to use (default: "default")')
   .option('-c, --clear', 'Clear the current session history')
-  .action((options) => {
+  .action(async (options) => {
+    // 改为异步函数
     console.log(chalk.blue('🤖 Starting interactive agent session...'))
 
     try {
-      // 检查配置是否存在
-      const { agents, providers, workspace } = loadConfig()
+      // 检查配置是否存在 - 现在是异步的
+      const { agents, providers, workspace } = await loadConfig()
 
       const curProvider = agents.defaults.model.split('/')[0]
       const curModel = agents.defaults.model.split('/')[1]
@@ -30,12 +31,13 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
         model: curModel,
       })
 
+      // 创建ContextMng实例，此时开始异步加载上下文
       const ctx = new ContextMng(workspace)
 
-      // 初始化会话管理器和指定会话
+      // 初始化会话管理器和指定会话 - 现在是异步的
       const sessionManager = new SessionManager()
       const sessionId = options.session || 'cli:default'
-      const session = sessionManager.getOrCreate(sessionId)
+      const session = await sessionManager.getOrCreate(sessionId)
 
       // 如果设置了清除选项，则清空会话历史
       if (options.clear) {
@@ -167,6 +169,7 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
         }
 
         try {
+          // 调用异步的msgHandler
           await agentLoop.msgHandler(
             trimmedInput,
             handleStreamData,
@@ -208,7 +211,10 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
           }
         }
 
-        sessionManager.save(session)
+        // 异步保存会话
+        sessionManager.save(session).catch((error) => {
+          console.error(chalk.red('Failed to save session:'), error.message)
+        })
 
         // 显示提示符等待下一个输入
         showPrompt()
