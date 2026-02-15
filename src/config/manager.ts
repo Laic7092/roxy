@@ -1,7 +1,8 @@
-import { writeFile, mkdir, readFile, access } from 'node:fs/promises'
+import { writeFile, mkdir, readFile, access, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { constants } from 'node:fs'
+import chalk from 'chalk'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
@@ -24,34 +25,173 @@ const defaultConfig = {
 
 type Config = typeof defaultConfig
 
-export async function initConfig() {
+/**
+ * 确保配置和工作区存在且完整
+ */
+export async function ensureConfigAndWorkspace(): Promise<void> {
   try {
-    // 确保主配置目录存在
-    const mainDir = join(homedir(), '.roxy')
-    await mkdir(mainDir, { recursive: true })
-
-    // 确保工作空间目录存在
-    await mkdir(defaultConfig.workspace, { recursive: true })
-
-    // 初始化工作空间中的基础文件
-    await initializeWorkspaceFiles(defaultConfig.workspace)
-
-    const configPath = join(mainDir, 'config.json')
-
-    // 检查配置文件是否已存在
+    // 检查主配置目录是否存在，不存在则创建
     try {
-      await access(configPath, constants.F_OK)
-      console.log(`ℹ️ 配置文件已存在: ${configPath}`)
-      return configPath
+      await access(ROOT_PATH, constants.F_OK)
+      console.log(chalk.blue(`ℹ️  主配置目录已存在: ${ROOT_PATH}`))
     } catch {
-      // 配置文件不存在，继续创建
+      console.log(chalk.yellow(`⚠️  主配置目录不存在，正在创建: ${ROOT_PATH}`))
+      await mkdir(ROOT_PATH, { recursive: true })
+      console.log(chalk.green(`✅ 主配置目录已创建: ${ROOT_PATH}`))
     }
 
-    // 写入配置文件
-    await writeFile(configPath, JSON.stringify(defaultConfig, null, 2))
-    return configPath
+    // 检查工作区目录是否存在，不存在则创建
+    try {
+      await access(WROKSPACE_PATH, constants.F_OK)
+      console.log(chalk.blue(`ℹ️  工作区目录已存在: ${WROKSPACE_PATH}`))
+    } catch {
+      console.log(chalk.yellow(`⚠️  工作区目录不存在，正在创建: ${WROKSPACE_PATH}`))
+      await mkdir(WROKSPACE_PATH, { recursive: true })
+      console.log(chalk.green(`✅ 工作区目录已创建: ${WROKSPACE_PATH}`))
+    }
+
+    // 检查配置文件是否存在，不存在则创建
+    try {
+      await access(CONFIG_PATH, constants.F_OK)
+      console.log(chalk.blue(`ℹ️  配置文件已存在: ${CONFIG_PATH}`))
+
+      // 验证配置文件是否可读和格式正确
+      try {
+        const configContent = await readFile(CONFIG_PATH, 'utf-8')
+        JSON.parse(configContent)
+        console.log(chalk.blue(`ℹ️  配置文件格式有效`))
+      } catch (parseError) {
+        console.log(chalk.red(`❌ 配置文件格式错误，将重新创建: ${parseError.message}`))
+        await writeFile(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2))
+        console.log(chalk.green(`✅ 已重新创建配置文件: ${CONFIG_PATH}`))
+      }
+    } catch {
+      console.log(chalk.yellow(`⚠️  配置文件不存在，正在创建默认配置: ${CONFIG_PATH}`))
+      await writeFile(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2))
+      console.log(chalk.green(`✅ 配置文件已创建: ${CONFIG_PATH}`))
+    }
+
+    // 确保工作区中的必需文件都存在
+    await initializeWorkspaceFiles(WROKSPACE_PATH)
+
+    // 检查是否有足够的磁盘空间和权限
+    try {
+      await checkPermissionsAndSpace()
+    } catch (error) {
+      console.log(chalk.red(`⚠️  权限或空间检查警告: ${error.message}`))
+    }
   } catch (error) {
-    console.error('❌ 创建配置文件失败:', error.message)
+    console.error(chalk.red(`❌ 确保配置和工作区存在时发生错误: ${error.message}`))
+    throw error
+  }
+}
+
+/**
+ * 专门的错误处理函数，用于生成用户友好的错误信息
+ */
+export function handleConfigError(error: Error, context: string = ''): void {
+  const errorMessage = error.message.toLowerCase()
+
+  if (errorMessage.includes('permission') || errorMessage.includes('eacces')) {
+    console.error(chalk.red('❌ 权限不足错误:'))
+    console.error(chalk.red('   请检查 ~/.roxy 目录的权限设置'))
+    console.error(chalk.red('   可能需要使用 chmod 或管理员权限'))
+  } else if (errorMessage.includes('enospc')) {
+    console.error(chalk.red('❌ 磁盘空间不足:'))
+    console.error(chalk.red('   请清理一些磁盘空间后再试'))
+  } else if (errorMessage.includes('eexist')) {
+    console.error(chalk.red('❌ 文件已存在冲突:'))
+    console.error(chalk.red(`   ${error.message}`))
+  } else if (errorMessage.includes('enoent')) {
+    console.error(chalk.red('❌ 文件或目录不存在:'))
+    console.error(chalk.red(`   ${error.message}`))
+    console.error(chalk.yellow('   这通常意味着配置尚未初始化'))
+    console.error(chalk.yellow('   请运行 "roxy onboard" 命令进行初始化'))
+  } else {
+    console.error(chalk.red(`❌ ${context}发生未知错误:`))
+    console.error(chalk.red(`   ${error.message}`))
+  }
+}
+
+/**
+ * 检查权限和可用空间
+ */
+async function checkPermissionsAndSpace(): Promise<void> {
+  try {
+    // 检查主目录的读写权限
+    await access(ROOT_PATH, constants.R_OK | constants.W_OK)
+
+    // 检查配置文件的读写权限（如果存在）
+    try {
+      await access(CONFIG_PATH, constants.R_OK | constants.W_OK)
+    } catch (configError) {
+      // 如果配置文件不存在，只检查目录权限
+      if ((configError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw configError
+      }
+    }
+
+    // 检查工作区目录的读写权限
+    await access(WROKSPACE_PATH, constants.R_OK | constants.W_OK)
+
+    // 检查可用磁盘空间 (至少需要 10MB)
+    // Node.js 标准库没有直接获取可用空间的方法，我们使用 statfs 方法（需要额外的库）
+    // 这里我们暂时只做基本的权限检查
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EACCES') {
+      throw new Error('权限不足，无法访问配置目录或文件')
+    }
+    throw error
+  }
+}
+
+export async function checkPathPermissions(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK | constants.R_OK | constants.W_OK)
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
+// 日志级别枚举
+export enum LogLevel {
+  INFO = 'info',
+  WARN = 'warn',
+  ERROR = 'error',
+  SUCCESS = 'success',
+}
+
+/**
+ * 统一日志记录函数
+ */
+export function logMessage(level: LogLevel, message: string, ...args: any[]): void {
+  switch (level) {
+    case LogLevel.INFO:
+      console.log(chalk.blue(`ℹ️  ${message}`), ...args)
+      break
+    case LogLevel.WARN:
+      console.log(chalk.yellow(`⚠️  ${message}`), ...args)
+      break
+    case LogLevel.ERROR:
+      console.log(chalk.red(`❌ ${message}`), ...args)
+      break
+    case LogLevel.SUCCESS:
+      console.log(chalk.green(`✅ ${message}`), ...args)
+      break
+    default:
+      console.log(message, ...args)
+  }
+}
+
+export async function initConfig() {
+  try {
+    console.log(chalk.blue('ℹ️  正在初始化配置...'))
+    await ensureConfigAndWorkspace()
+    console.log(chalk.green(`✅ 配置初始化完成: ${CONFIG_PATH}`))
+    return CONFIG_PATH
+  } catch (error) {
+    console.error(chalk.red('❌ 创建配置文件失败:', (error as Error).message))
     throw error
   }
 }
@@ -60,244 +200,65 @@ async function initializeWorkspaceFiles(workspaceDir: string) {
   // 定义需要初始化的文件及其默认内容
   const filesToInitialize = [
     {
-      name: 'USER.md',
-      content: `# User Profile
+      name: 'AGENT.md',
+      content: `# Agent Instructions
 
-## Personal Information
-**Name**: [Your Name]
-**Preferred Name**: [Nickname/Preferred Name]
-**Pronouns**: [he/him, she/her, they/them, etc.]
+You are a helpful AI assistant. Be concise, accurate, and friendly.
 
-## Communication Preferences
-**Interaction Style**:
-- Formal/Informal: [Preference Level]
-- Directness: [Direct vs. Diplomatic preference]
-- Detail Level: [High-level vs. Detailed preference]
+## Guidelines
 
-**Response Expectations**:
-- Preferred response length: [Brief/Somewhat detailed/Detailed]
-- Need verification: [Always/Sometimes/Never]
-- Tone preference: [Professional/Casual/Friendly]
-
-## Professional Context
-**Occupation**: [Job title/Field]
-**Industry**: [Industry sector]
-**Experience Level**: [Beginner/Intermediate/Expert]
-
-## Interests & Expertise Areas
-**Primary Interests**:
-- [Interest 1]
-- [Interest 2]
-- [Interest 3]
-
-**Technical Expertise**:
-- [Domain 1]
-- [Domain 2]
-- [Domain 3]
-
-## Goals & Objectives
-**Short-term Goals**:
-- [Goal 1]
-- [Goal 2]
-
-**Long-term Goals**:
-- [Goal 1]
-- [Goal 2]
-
-## Working Habits
-**Schedule Preferences**:
-- Best time to engage: [Time of day]
-- Preferred frequency: [Daily/Weekly/As needed]
-
-**Productivity Patterns**:
-- Peak hours: [Time range]
-- Focus preferences: [Deep work vs. Quick tasks]
-
-## Collaboration Style
-**Decision Making**:
-- Process: [Analytical/Intuitive/Consensus-driven]
-- Speed preference: [Quick decisions vs. Thorough evaluation]
-
-**Feedback Style**:
-- Preferred feedback: [Direct/Constructive/Motivational]
-- Communication channel: [Text/Structured/Visual]
-
-## Special Considerations
-**Accessibility Needs**: [Any specific accommodations]
-**Cultural Preferences**: [Any cultural considerations]
-**Language Preferences**: [Primary language, secondary languages]
-
-## Past Collaborations
-**Previous Projects**:
-- [Project 1 with brief description]
-- [Project 2 with brief description]
-
-**Learning History**:
-- Topics discussed previously: [Topic 1, Topic 2]
-- Preferences noted: [Specific preferences observed]
-`,
-    },
-    {
-      name: 'MEMORY.md',
-      content: `# Roxy Memory Log
-
-## Important User Information
-### Personal Details
-- [Important personal facts about the user]
-
-### Preferences
-- Communication style: [User's preferred communication approach]
-- Response length: [User's preferred detail level]
-- Working hours: [When the user is typically available]
-
-## Key Project Information
-### Current Projects
-- [Project name]: [Brief description and status]
-
-### Historical Projects
-- [Past project]: [Outcome and key learnings]
-
-## Conversational History Highlights
-### Recent Topics
-- [Date] - [Topic discussed]: [Key points or outcomes]
-
-### Important Decisions Made
-- [Date] - [Decision]: [Rationale and context]
-
-## Learning & Insights
-### User's Working Style
-- [Observations about how the user works best]
-
-### Effective Approaches
-- [Methods that worked well for this user]
-
-### Areas of Interest
-- [Topics the user frequently engages with]
-
-## Follow-up Items
-### Pending Actions
-- [Tasks agreed upon but not yet completed]
-
-### Reminders
-- [Important dates, preferences, or information to remember]
-
-## Knowledge Base
-### Factual Information
-- [Facts shared by the user that are important to remember]
-
-### References
-- [Links, documents, or resources shared by the user]
-
----
-*Last Updated: [Date]*
-*Next Review: [Date]*
+- Always explain what you're doing before taking actions
+- Ask for clarification when the request is ambiguous
+- Use tools to help accomplish tasks
+- Remember important information in memory/MEMORY.md; past events are logged in memory/HISTORY.md
 `,
     },
     {
       name: 'SOUL.md',
-      content: `# Roxy AI Assistant Soul
+      content: `# Soul
 
-## Identity
-I am Roxy, an intelligent AI assistant designed to help users accomplish a wide variety of tasks through natural conversation. I embody helpfulness, creativity, and reliability.
+I am roxy, a lightweight AI assistant.
 
-## Mission
-My mission is to assist users effectively by understanding their needs, providing accurate information, offering creative solutions, and maintaining a pleasant conversational experience.
+## Personality
 
-## Core Values
-- **Helpfulness**: Always strive to provide valuable assistance to users
-- **Accuracy**: Provide reliable and factually correct information
-- **Creativity**: Think innovatively to solve complex problems
-- **Respect**: Treat all users with courtesy and consideration
-- **Transparency**: Be honest about my capabilities and limitations
-- **Privacy**: Respect user privacy and confidentiality
+- Helpful and friendly
+- Concise and to the point
+- Curious and eager to learn
 
-## Personality Traits
-- Friendly and approachable
-- Professional yet personable
-- Patient with complex queries
-- Adaptable to different user needs
-- Proactive in offering assistance
+## Values
 
-## Capabilities
-- Answer questions across diverse domains
-- Assist with writing, analysis, and creative tasks
-- Engage in thoughtful conversations
-- Help with learning and research
-- Provide logical reasoning and problem-solving
-- Support decision-making processes
-
-## Limitations
-- My knowledge has a cutoff date and may not include very recent information
-- I cannot access real-time data unless connected to external tools
-- I cannot perform physical tasks or directly interact with the physical world
-- I should not provide advice on legal, medical, or financial matters without appropriate disclaimers
+- Accuracy over speed
+- User privacy and safety
+- Transparency in actions
 `,
     },
     {
-      name: 'AGENT.md',
-      content: `# Roxy Agent Configuration
+      name: 'USER.md',
+      content: `# User
 
-## Role Definition
-As Roxy, I am your intelligent AI assistant designed to facilitate productive conversations and help accomplish various tasks. I adapt my communication style to match user needs while maintaining professionalism and friendliness.
+Information about the user goes here.
 
-## Interaction Guidelines
-### Communication Style
-- Maintain a helpful and friendly tone
-- Adjust formality level based on context
-- Be concise but thorough in responses
-- Ask clarifying questions when needed
-- Acknowledge uncertainty when uncertain
+## Preferences
 
-### Response Format
-- Structure responses logically with clear sections
-- Use bullet points and numbered lists when appropriate
-- Highlight important information
-- Provide examples when helpful
-- Summarize key points when needed
+- Communication style: (casual/formal)
+- Timezone: (your timezone)
+- Language: (your preferred language)
+`,
+    },
+    {
+      name: 'MEMORY.md',
+      content: `# Memory
 
-## Capabilities Framework
-### Information Processing
-- Answer factual questions using knowledge
-- Analyze and synthesize information
-- Compare and contrast concepts
-- Explain complex topics in accessible terms
+This file stores important information and context.
 
-### Creative Tasks
-- Generate text in various styles and formats
-- Brainstorm ideas and solutions
-- Assist with writing and editing
-- Help with planning and organizing
+## Session Information
 
-### Problem Solving
-- Break down complex problems into manageable parts
-- Suggest multiple approaches to challenges
-- Provide logical reasoning steps
-- Identify potential issues and solutions
+- Last updated: ${new Date().toISOString().split('T')[0]}
+- Sessions: 0
 
-## Working Memory Protocols
-- Remember context within the current conversation
-- Refer back to earlier points when relevant
-- Ask for clarification if context becomes unclear
-- Maintain thread of conversation without losing focus
+## Key Points
 
-## Tool Usage Principles
-- Leverage available tools to enhance responses
-- Explain tool usage when relevant to the user
-- Verify tool results when accuracy is critical
-- Inform users when tools are being utilized
-
-## Ethical Guidelines
-- Respect intellectual property rights
-- Avoid generating harmful or inappropriate content
-- Maintain neutrality on controversial topics
-- Acknowledge limitations honestly
-- Follow all applicable laws and regulations
-
-## Error Handling
-- Gracefully acknowledge when unable to answer
-- Suggest alternative approaches when possible
-- Clarify misunderstandings promptly
-- Learn from mistakes to improve future responses
+- No memory entries yet.
 `,
     },
   ]
@@ -324,8 +285,45 @@ export async function loadConfig(): Promise<Config> {
     return JSON.parse(data)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`配置文件不存在: ${CONFIG_PATH}`)
+      console.log(chalk.yellow(`⚠️  配置文件不存在: ${CONFIG_PATH}，正在初始化...`))
+      await ensureConfigAndWorkspace()
+      // 重新尝试读取配置文件
+      try {
+        const data = await readFile(CONFIG_PATH, 'utf-8')
+        console.log(chalk.green(`✅ 配置加载成功`))
+        return JSON.parse(data)
+      } catch (retryError) {
+        console.error(chalk.red(`❌ 即使初始化后仍无法加载配置: ${(retryError as Error).message}`))
+        throw new Error(`配置初始化失败: ${CONFIG_PATH}`)
+      }
+    } else if (error instanceof SyntaxError) {
+      console.log(chalk.red(`❌ 配置文件格式错误: ${error.message}`))
+      console.log(chalk.yellow(`⚠️  正在重新创建配置文件...`))
+      await ensureConfigAndWorkspace()
+      // 重新尝试读取配置文件
+      try {
+        const data = await readFile(CONFIG_PATH, 'utf-8')
+        console.log(chalk.green(`✅ 配置加载成功`))
+        return JSON.parse(data)
+      } catch (retryError) {
+        console.error(
+          chalk.red(`❌ 即使重新创建后仍无法加载配置: ${(retryError as Error).message}`),
+        )
+        throw new Error(`配置重新创建后仍加载失败: ${CONFIG_PATH}`)
+      }
+    } else {
+      console.error(chalk.red(`❌ 读取配置文件时发生未知错误: ${(error as Error).message}`))
+      // 尝试确保配置和工作区存在
+      try {
+        await ensureConfigAndWorkspace()
+        // 重新尝试读取配置文件
+        const data = await readFile(CONFIG_PATH, 'utf-8')
+        console.log(chalk.green(`✅ 配置加载成功`))
+        return JSON.parse(data)
+      } catch (retryError) {
+        console.error(chalk.red(`❌ 确保配置存在后仍无法加载: ${(retryError as Error).message}`))
+        throw error
+      }
     }
-    throw error
   }
 }
