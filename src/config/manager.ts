@@ -1,64 +1,64 @@
-import { writeFile, mkdir, readFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { join } from "node:path"
-import { existsSync, readFileSync } from "node:fs"
+import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
 export const CONFIG_PATH = join(ROOT_PATH, 'config.json')
 
 const defaultConfig = {
-    workspace: WROKSPACE_PATH,
-    agents: {
-        defaults: {
-            model: "deepseek/deepseek-chat"
-        }
+  workspace: WROKSPACE_PATH,
+  agents: {
+    defaults: {
+      model: 'deepseek/deepseek-chat',
     },
-    providers: {
-        deepseek: {
-            apiKey: '',
-            baseURL: 'https://api.deepseek.com'
-        }
-    }
+  },
+  providers: {
+    deepseek: {
+      apiKey: '',
+      baseURL: 'https://api.deepseek.com',
+    },
+  },
 }
 
 type Config = typeof defaultConfig
 
 export async function initConfig() {
-    try {
-        // 确保主配置目录存在
-        const mainDir = join(homedir(), '.roxy');
-        await mkdir(mainDir, { recursive: true });
+  try {
+    // 确保主配置目录存在
+    const mainDir = join(homedir(), '.roxy')
+    await mkdir(mainDir, { recursive: true })
 
-        // 确保工作空间目录存在
-        await mkdir(defaultConfig.workspace, { recursive: true });
+    // 确保工作空间目录存在
+    await mkdir(defaultConfig.workspace, { recursive: true })
 
-        // 初始化工作空间中的基础文件
-        await initializeWorkspaceFiles(defaultConfig.workspace);
+    // 初始化工作空间中的基础文件
+    await initializeWorkspaceFiles(defaultConfig.workspace)
 
-        const configPath = join(mainDir, 'config.json');
+    const configPath = join(mainDir, 'config.json')
 
-        // 检查配置文件是否已存在
-        if (existsSync(configPath)) {
-            console.log(`ℹ️ 配置文件已存在: ${configPath}`)
-            return configPath
-        }
-
-        // 写入配置文件
-        await writeFile(configPath, JSON.stringify(defaultConfig, null, 2))
-        return configPath
-    } catch (error) {
-        console.error('❌ 创建配置文件失败:', error.message)
-        throw error
+    // 检查配置文件是否已存在
+    if (existsSync(configPath)) {
+      console.log(`ℹ️ 配置文件已存在: ${configPath}`)
+      return configPath
     }
+
+    // 写入配置文件
+    await writeFile(configPath, JSON.stringify(defaultConfig, null, 2))
+    return configPath
+  } catch (error) {
+    console.error('❌ 创建配置文件失败:', error.message)
+    throw error
+  }
 }
 
 async function initializeWorkspaceFiles(workspaceDir: string) {
-    // 定义需要初始化的文件及其默认内容
-    const filesToInitialize = [
-        {
-            name: 'USER.md',
-            content: `# User Profile
+  // 定义需要初始化的文件及其默认内容
+  const filesToInitialize = [
+    {
+      name: 'USER.md',
+      content: `# User Profile
 
 ## Personal Information
 **Name**: [Your Name]
@@ -132,11 +132,11 @@ async function initializeWorkspaceFiles(workspaceDir: string) {
 **Learning History**:
 - Topics discussed previously: [Topic 1, Topic 2]
 - Preferences noted: [Specific preferences observed]
-`
-        },
-        {
-            name: 'MEMORY.md',
-            content: `# Roxy Memory Log
+`,
+    },
+    {
+      name: 'MEMORY.md',
+      content: `# Roxy Memory Log
 
 ## Important User Information
 ### Personal Details
@@ -188,11 +188,11 @@ async function initializeWorkspaceFiles(workspaceDir: string) {
 ---
 *Last Updated: [Date]*
 *Next Review: [Date]*
-`
-        },
-        {
-            name: 'SOUL.md',
-            content: `# Roxy AI Assistant Soul
+`,
+    },
+    {
+      name: 'SOUL.md',
+      content: `# Roxy AI Assistant Soul
 
 ## Identity
 I am Roxy, an intelligent AI assistant designed to help users accomplish a wide variety of tasks through natural conversation. I embody helpfulness, creativity, and reliability.
@@ -228,11 +228,11 @@ My mission is to assist users effectively by understanding their needs, providin
 - I cannot access real-time data unless connected to external tools
 - I cannot perform physical tasks or directly interact with the physical world
 - I should not provide advice on legal, medical, or financial matters without appropriate disclaimers
-`
-        },
-        {
-            name: 'AGENT.md',
-            content: `# Roxy Agent Configuration
+`,
+    },
+    {
+      name: 'AGENT.md',
+      content: `# Roxy Agent Configuration
 
 ## Role Definition
 As Roxy, I am your intelligent AI assistant designed to facilitate productive conversations and help accomplish various tasks. I adapt my communication style to match user needs while maintaining professionalism and friendliness.
@@ -295,28 +295,28 @@ As Roxy, I am your intelligent AI assistant designed to facilitate productive co
 - Suggest alternative approaches when possible
 - Clarify misunderstandings promptly
 - Learn from mistakes to improve future responses
-`
-        }
-    ];
+`,
+    },
+  ]
 
-    // 初始化每个文件
-    for (const file of filesToInitialize) {
-        const filePath = join(workspaceDir, file.name);
+  // 初始化每个文件
+  for (const file of filesToInitialize) {
+    const filePath = join(workspaceDir, file.name)
 
-        // 检查文件是否已存在
-        if (!existsSync(filePath)) {
-            await writeFile(filePath, file.content, 'utf-8');
-            console.log(`✅ 已创建: ${filePath}`);
-        } else {
-            console.log(`ℹ️  文件已存在: ${filePath}`);
-        }
+    // 检查文件是否已存在
+    if (!existsSync(filePath)) {
+      await writeFile(filePath, file.content, 'utf-8')
+      console.log(`✅ 已创建: ${filePath}`)
+    } else {
+      console.log(`ℹ️  文件已存在: ${filePath}`)
     }
+  }
 }
 
 export function loadConfig(): Config {
-    if (!existsSync(CONFIG_PATH)) {
-        throw new Error(`配置文件不存在: ${CONFIG_PATH}`)
-    }
-    const data = readFileSync(CONFIG_PATH, 'utf-8')
-    return JSON.parse(data)
+  if (!existsSync(CONFIG_PATH)) {
+    throw new Error(`配置文件不存在: ${CONFIG_PATH}`)
+  }
+  const data = readFileSync(CONFIG_PATH, 'utf-8')
+  return JSON.parse(data)
 }
