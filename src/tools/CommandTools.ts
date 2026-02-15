@@ -1,7 +1,6 @@
 import { spawn, exec } from 'child_process'
 import { resolve } from 'path'
-import { access, constants } from 'fs/promises'
-import { createWriteStream, appendFileSync } from 'fs'
+import { access, appendFile, constants } from 'fs/promises'
 
 // 命令白名单（暂不启用）
 const COMMAND_WHITELIST = [
@@ -49,17 +48,17 @@ const LOG_FILE_PATH = './command_logs.txt' // 可以根据需要调整日志文�
  * @param success 是否成功
  * @param error 错误信息（如果有）
  */
-function logCommandExecution(
+async function logCommandExecution(
   command: string,
   workspace: string,
   success: boolean,
   error?: string,
-): void {
+): Promise<void> {
   const timestamp = new Date().toISOString()
   const logEntry = `[${timestamp}] Command: "${command}" | Workspace: "${workspace}" | Success: ${success}${error ? ` | Error: ${error}` : ''}\n`
 
   try {
-    appendFileSync(LOG_FILE_PATH, logEntry, { encoding: 'utf8' })
+    await appendFile(LOG_FILE_PATH, logEntry, { encoding: 'utf8' })
   } catch (logError) {
     console.error('Failed to write command log:', logError)
   }
@@ -156,10 +155,10 @@ export async function executeCommand(
       }, timeout)
     })
 
-    logCommandExecution(fullCommand, workspace, true)
+    await logCommandExecution(fullCommand, workspace, true)
     return { success: true, stdout: result.stdout, stderr: result.stderr }
   } catch (error) {
-    logCommandExecution(fullCommand, workspace, false, error.message)
+    await logCommandExecution(fullCommand, workspace, false, error.message)
     return { success: false, error: error.message }
   }
 }
@@ -228,10 +227,10 @@ export async function executeSimpleCommand(
       },
     )
 
-    logCommandExecution(command, workspace, true)
+    await logCommandExecution(command, workspace, true)
     return { success: true, stdout, stderr }
   } catch (error) {
-    logCommandExecution(command, workspace, false, error.message)
+    await logCommandExecution(command, workspace, false, error.message)
     return { success: false, error: error.message }
   }
 }

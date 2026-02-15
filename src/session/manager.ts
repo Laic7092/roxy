@@ -1,4 +1,3 @@
-import { readFileSync } from 'fs'
 import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
 import { join } from 'path'
 
@@ -91,10 +90,10 @@ export class SessionManager {
     return key.replace(/[^a-z0-9]/gi, '_') + '.jsonl'
   }
 
-  getOrCreate(key: string): Session {
+  async getOrCreate(key: string): Promise<Session> {
     const file = join(this.dir, this.encodeKey(key))
     try {
-      const content = readFileSync(file, 'utf-8')
+      const content = await readFile(file, 'utf-8')
       const lines = content.trim().split('\n').filter(Boolean)
       const session = new Session(key)
       session.messages = lines.map((line) => JSON.parse(line))

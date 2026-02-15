@@ -1,8 +1,8 @@
 import { bus } from '../bus/instance'
-import { LiteLLMProvider } from '../provider/llm'
-import { ContextMng } from './context'
-import { Session } from '../session/manager'
-import { ToolExecutor } from '../tools/ToolExecutor'
+import type { LiteLLMProvider } from '../provider/llm'
+import type { ContextMng } from './context'
+import type { Session } from '../session/manager'
+import type { ToolExecutor } from '../tools/ToolExecutor'
 
 // 定义工具调用回调类型
 export type ToolCallCallback = (toolName: string, args: any) => void
@@ -40,11 +40,11 @@ export class AgentLoop {
   ) {
     this.session.addMessage('user', msg)
 
-    // 构建上下文
-    const contextMessages = this.ctx.buildContext(this.session.messages)
+    // 构建上下文 - 现在是异步的
+    const contextMessages = await this.ctx.buildContext(this.session.messages)
 
     // 获取工具定义
-    const tools = this.toolExecutor.getToolDefinitions()
+    const tools = await this.toolExecutor.getToolDefinitions()
 
     // 调用启用流式处理的 API，传递流式数据回调和工具定义
     let result = await this.provider.chat({
@@ -101,7 +101,7 @@ export class AgentLoop {
       }
 
       // 再次调用AI，将工具结果作为上下文
-      const updatedContextMessages = this.ctx.buildContext(this.session.messages)
+      const updatedContextMessages = await this.ctx.buildContext(this.session.messages)
 
       result = await this.provider.chat({
         messages: updatedContextMessages,

@@ -9,8 +9,8 @@ describe('ToolExecutor', () => {
     toolExecutor = new ToolExecutor('/mock/workspace')
   })
 
-  it('should return tool definitions', () => {
-    const tools = toolExecutor.getToolDefinitions()
+  it('should return tool definitions', async () => {
+    const tools = await toolExecutor.getToolDefinitions()
 
     expect(tools).toBeDefined()
     expect(Array.isArray(tools)).toBe(true)
@@ -26,7 +26,7 @@ describe('ToolExecutor', () => {
 
   it('should execute readFile tool', async () => {
     // 我们不能真正测试文件读取，但可以检查工具是否被正确注册
-    const tools = toolExecutor.getToolDefinitions()
+    const tools = await toolExecutor.getToolDefinitions()
     const readFileTool = tools.find((tool) => tool.function.name === 'readFile')
 
     expect(readFileTool).toBeDefined()
@@ -34,7 +34,7 @@ describe('ToolExecutor', () => {
   })
 
   it('should execute writeFile tool', async () => {
-    const tools = toolExecutor.getToolDefinitions()
+    const tools = await toolExecutor.getToolDefinitions()
     const writeFileTool = tools.find((tool) => tool.function.name === 'writeFile')
 
     expect(writeFileTool).toBeDefined()
@@ -43,14 +43,14 @@ describe('ToolExecutor', () => {
   })
 
   it('should execute listDir tool', async () => {
-    const tools = toolExecutor.getToolDefinitions()
+    const tools = await toolExecutor.getToolDefinitions()
     const listDirTool = tools.find((tool) => tool.function.name === 'listDir')
 
     expect(listDirTool).toBeDefined()
   })
 
   it('should execute getWorkspace tool', async () => {
-    const tools = toolExecutor.getToolDefinitions()
+    const tools = await toolExecutor.getToolDefinitions()
     const getWorkspaceTool = tools.find((tool) => tool.function.name === 'getWorkspace')
 
     expect(getWorkspaceTool).toBeDefined()

@@ -2,8 +2,8 @@ import { Command } from 'commander'
 import { initConfig } from '../../config/manager'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { existsSync, readFileSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
 
 export const OnboardCommand = new Command('onboard')
 
@@ -16,11 +16,16 @@ OnboardCommand.description('Initialize workspace and config.json')
       // 检查配置文件是否存在
       const configPath = join(homedir(), '.roxy', 'config.json')
 
-      if (existsSync(configPath) && !options.force) {
-        console.log('⚠️  Configuration already exists. Use --force to reinitialize.')
-        const currentConfig = readFileSync(configPath, 'utf-8')
-        console.log('Current config:\n', currentConfig)
-        return
+      try {
+        await access(configPath, constants.F_OK)
+        if (!options.force) {
+          console.log('⚠️  Configuration already exists. Use --force to reinitialize.')
+          const currentConfig = await readFile(configPath, 'utf-8')
+          console.log('Current config:\n', currentConfig)
+          return
+        }
+      } catch {
+        // 文件不存在，继续初始化
       }
 
       // 初始化配置
