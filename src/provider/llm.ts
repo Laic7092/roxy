@@ -9,6 +9,8 @@ export class LiteLLMProvider extends LLMProvider {
     const { messages, stream, onStreamData, tools, tool_choice } = ctx
     const { apiKey, baseURL, model } = this.cfg
 
+    const fullURL = baseURL + 'chat/completions'
+
     const requestBody: any = {
       messages,
       model,
@@ -41,7 +43,7 @@ export class LiteLLMProvider extends LLMProvider {
       }
 
       // console.log(options)
-      const response = await fetch(baseURL, options)
+      const response = await fetch(fullURL, options)
       if (!response.ok) {
         // 尝试获取响应体内容作为错误信息
         let errorMessage = `HTTP error! status: ${response.status}`
