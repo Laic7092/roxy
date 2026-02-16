@@ -12,7 +12,7 @@ const defaultConfig = {
   workspace: WROKSPACE_PATH,
   agents: {
     defaults: {
-      model: 'deepseek/deepseek-chat',
+      model: 'ollama/qwen3:4b-instruct-2507-q4_K_M',
     },
   },
   providers: {
@@ -20,6 +20,10 @@ const defaultConfig = {
       apiKey: '',
       baseURL: 'https://api.deepseek.com',
     },
+    ollama: {
+      apiKey: 'ollama-local',
+      baseURL: 'http://localhost:11434/v1/'
+    }
   },
 }
 
