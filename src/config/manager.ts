@@ -22,8 +22,8 @@ const defaultConfig = {
     },
     ollama: {
       apiKey: 'ollama-local',
-      baseURL: 'http://localhost:11434/v1/'
-    }
+      baseURL: 'http://localhost:11434/v1',
+    },
   },
 }
 

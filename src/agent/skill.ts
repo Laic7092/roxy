@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export class SkillsLoader {
   constructor(
     private workspace: string,
-    private builtinDir = join(__dirname, '../../skills'),
+    private builtinDir = join(__dirname, '../src/skills'),
   ) {}
 
   async getSkill(name: string): Promise<string | null> {
