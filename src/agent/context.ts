@@ -37,9 +37,10 @@ export class ContextMng {
       },
     ]
 
+    const skillContent = await skillsLoader.loadMultiple(skills)
     _sys_msg.push({
       role: 'system',
-      content: '# SKILLS' + skills.join('\n'),
+      content: '# SKILLS\n\n' + skillContent,
     })
 
     return _sys_msg

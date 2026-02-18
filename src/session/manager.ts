@@ -4,8 +4,8 @@ import { join } from 'path'
 export interface Message {
   role: Role
   content: string
-  timestamp: string
-  tool_calls: any
+  timestamp?: string
+  tool_calls?: any
 }
 
 export interface ToolMessage {
