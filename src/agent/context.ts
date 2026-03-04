@@ -1,17 +1,42 @@
 import { readFile } from 'fs/promises'
 import { Memory } from './memory'
-import { SkillsLoader } from './skill'
+import { SkillsLoader, SkillMeta } from './skill'
 import { join } from 'path'
 import type { Message, ToolMessage } from '../session/manager'
+import chalk from 'chalk'
 
 export class ContextMng {
   private sysMsgPromise: Promise<Message[]>
   private skillsLoader: SkillsLoader
   workspace: string
+  private currentSkills: SkillMeta[] = []
 
-  constructor(workspace: string) {
+  constructor(workspace: string, autoReloadSkills: boolean = true) {
     this.workspace = workspace
-    this.skillsLoader = new SkillsLoader(workspace)
+    this.skillsLoader = new SkillsLoader(workspace, undefined, {
+      autoReload: autoReloadSkills,
+      onChange: (skills) => this.onSkillsChanged(skills),
+    })
+    this.sysMsgPromise = this.loadSystemMessages()
+  }
+
+  /**
+   * 技能变化时的回调
+   */
+  private onSkillsChanged(skills: SkillMeta[]): void {
+    this.currentSkills = skills
+    console.log(chalk.green('\n📚 Skills updated!') + ` ${skills.length} skill(s) available.`)
+    // 重新加载系统消息
+    this.sysMsgPromise = this.loadSystemMessages()
+  }
+
+  /**
+   * 重新加载技能列表和系统消息
+   */
+  async reloadSkills(): Promise<void> {
+    // 清除技能加载器的缓存
+    this.skillsLoader.clearCache()
+    // 重新加载系统消息
     this.sysMsgPromise = this.loadSystemMessages()
   }
 
@@ -32,7 +57,9 @@ export class ContextMng {
       },
     ]
 
-    const skillMetas = await this.skillsLoader.getSkillMetadata()
+    // 使用缓存加载技能元数据
+    const skillMetas = await this.skillsLoader.getSkillMetadata(true)
+    this.currentSkills = skillMetas
     _sys_msg.push({
       role: 'system',
       content: `# Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\nUse the 'load_skill' tool to load a skill's full instructions when needed.`,

@@ -31,6 +31,29 @@ export class AgentLoop {
     this.toolExecutor = toolExecutor
   }
 
+  /**
+   * 重新加载技能列表
+   */
+  async reloadSkills(): Promise<void> {
+    await this.ctx.reloadSkills()
+  }
+
+  /**
+   * 获取当前可用的技能列表
+   */
+  async getAvailableSkills(): Promise<string[]> {
+    const sysMsgs = await this.ctx.buildContext([])
+    const skillsMsg = sysMsgs.find(msg => msg.role === 'system' && msg.content.includes('# Available Skills'))
+    if (!skillsMsg) return []
+
+    const content = skillsMsg.content
+    const lines = content.split('\n').filter(line => line.startsWith('- **'))
+    return lines.map(line => {
+      const match = line.match(/\*\*([^*]+)\*\*/)
+      return match ? match[1] : ''
+    }).filter(Boolean)
+  }
+
   async msgHandler(
     msg: string,
     onStreamData?: (data: string) => void,

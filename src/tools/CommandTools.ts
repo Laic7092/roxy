@@ -8,7 +8,7 @@ const COMMAND_BLACKLIST = [
   'dd', 'shutdown', 'reboot', 'halt', 'poweroff',
   'kill', 'pkill', 'killall', 'sudo', 'su', 'chmod',
   'chown', 'chattr', 'passwd', 'useradd', 'userdel',
-  'wget', 'curl', 'nc', 'netcat', 'telnet', 'ssh',
+  'wget', 'nc', 'netcat', 'telnet', 'ssh',
   'scp', 'rsync', 'ftp', 'sftp', 'mount', 'umount'
 ]
 

@@ -32,7 +32,7 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       })
 
       // 创建ContextMng实例，此时开始异步加载上下文
-      const ctx = new ContextMng(workspace)
+      const ctx = new ContextMng(workspace, true)
 
       // 初始化会话管理器和指定会话 - 现在是异步的
       const sessionManager = new SessionManager()
@@ -56,7 +56,7 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       })
 
       console.log(chalk.green(`💬 Entering interactive mode (session: ${sessionId})`))
-      console.log(chalk.gray('Commands: /help, /clear, /history, /exit\n'))
+      console.log(chalk.gray('Commands: /help, /clear, /history, /skills, /exit\n'))
 
       // 创建 readline 接口
       const rl = readline.createInterface({
@@ -100,12 +100,25 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
                 }
               })
               break
+            case '/skills':
+              const skills = await agentLoop.getAvailableSkills()
+              console.log(chalk.gray('\n📚 Available Skills:'))
+              if (skills.length === 0) {
+                console.log(chalk.yellow('  No skills available.'))
+              } else {
+                skills.forEach(skill => {
+                  console.log(chalk.green(`  - ${skill}`))
+                })
+              }
+              break
             case '/help':
               console.log(chalk.gray('\n📚 Available commands:'))
-              console.log(chalk.gray('  /help    - Show this help message'))
-              console.log(chalk.gray('  /clear  - Clear session history'))
-              console.log(chalk.gray('  /history - Show session history'))
-              console.log(chalk.gray('  /exit   - Exit the session'))
+              console.log(chalk.gray('  /help     - Show this help message'))
+              console.log(chalk.gray('  /clear    - Clear session history'))
+              console.log(chalk.gray('  /history  - Show session history'))
+              console.log(chalk.gray('  /skills   - List available skills'))
+              console.log(chalk.gray('  /exit     - Exit the session'))
+              console.log(chalk.gray('\n📝 Skills are automatically reloaded when changed.'))
               break
             default:
               console.log(
