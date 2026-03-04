@@ -168,6 +168,8 @@ export class CLIChannel extends BaseChannel {
 
     // 直接调用 AgentLoop 处理
     await this.processMessage(trimmedInput)
+
+    this.showPrompt()
   }
 
   /**
@@ -195,6 +197,8 @@ export class CLIChannel extends BaseChannel {
           this.publish('tool_result', { name, result })
         },
       })
+
+      await this.publish('response', '')
 
       // 保存 session 到磁盘
       await this.sessionManager.save(this.session)
@@ -284,7 +288,7 @@ export class CLIChannel extends BaseChannel {
       this.spinner.stop()
     }
     this.aiResponse += chunk
-    process.stdout.write(chalk.blue(chunk))
+    process.stdout.write(chalk.blueBright(chunk))
   }
 
   private showResponse(content: string): void {
@@ -292,7 +296,7 @@ export class CLIChannel extends BaseChannel {
       this.spinner.stop()
     }
     if (!this.aiResponse) {
-      console.log(chalk.blue(content))
+      console.log(chalk.blueBright(content))
     }
     console.log('')
     this.aiResponse = ''
@@ -302,7 +306,7 @@ export class CLIChannel extends BaseChannel {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
     }
-    console.log(chalk.yellow(`\n🔧 [Tool Call]: ${content.name}(${JSON.stringify(content.args)})`))
+    console.log(chalk.gray(`\n🔧 [Tool Call]: ${content.name}(${JSON.stringify(content.args)})`))
 
     if (this.spinner) {
       this.spinner.text = chalk.gray(`Executing ${content.name}...`)
@@ -314,7 +318,7 @@ export class CLIChannel extends BaseChannel {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
     }
-    console.log(chalk.magenta(`\n💾 [Tool Result]: ${JSON.stringify(content.result)}`))
+    console.log(chalk.gray(`\n💾 [Tool Result]: ${JSON.stringify(content.result)}`))
 
     if (this.spinner) {
       this.spinner.text = chalk.gray('Processing tool result...')
