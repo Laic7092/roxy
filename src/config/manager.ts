@@ -12,7 +12,7 @@ const defaultConfig = {
   workspace: WROKSPACE_PATH,
   agents: {
     defaults: {
-      model: 'ollama/qwen3:4b-instruct-2507-q4_K_M',
+      model: 'ollama/qwen3.5:9b',
     },
   },
   providers: {

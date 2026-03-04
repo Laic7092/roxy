@@ -5,25 +5,20 @@ import { join } from 'path'
 import type { Message, ToolMessage } from '../session/manager'
 
 export class ContextMng {
-  private sysMsgPromise: Promise<Message[]> // 异步加载系统消息
+  private sysMsgPromise: Promise<Message[]>
+  private skillsLoader: SkillsLoader
   workspace: string
 
   constructor(workspace: string) {
     this.workspace = workspace
-    // 在构造函数中启动异步加载过程
+    this.skillsLoader = new SkillsLoader(workspace)
     this.sysMsgPromise = this.loadSystemMessages()
   }
 
   private async loadSystemMessages(): Promise<Message[]> {
-    // 创建Memory实例并异步获取记忆
     const memory = new Memory(this.workspace)
     const memoryContent = await memory.getMemory()
 
-    // 创建SkillsLoader实例并异步获取技能
-    const skillsLoader = new SkillsLoader(this.workspace)
-    const skills = await skillsLoader.getAvailableSkills()
-
-    // 异步加载代理提示
     const agentPrompt = await this.loadAgentPrompt(this.workspace)
 
     const _sys_msg: Message[] = [
@@ -37,10 +32,10 @@ export class ContextMng {
       },
     ]
 
-    const skillContent = await skillsLoader.loadMultiple(skills)
+    const skillMetas = await this.skillsLoader.getSkillMetadata()
     _sys_msg.push({
       role: 'system',
-      content: '# SKILLS\n\n' + skillContent,
+      content: `# Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\nUse the 'load_skill' tool to load a skill's full instructions when needed.`,
     })
 
     return _sys_msg
@@ -62,9 +57,12 @@ export class ContextMng {
     return contents.join('\n')
   }
 
-  // 异步构建上下文
   async buildContext(messages: (Message | ToolMessage)[]): Promise<(Message | ToolMessage)[]> {
     const sysMsgs = await this.sysMsgPromise
     return [...sysMsgs, ...messages]
+  }
+
+  async loadSkillContent(skillName: string): Promise<string | null> {
+    return this.skillsLoader.loadSkill(skillName)
   }
 }
