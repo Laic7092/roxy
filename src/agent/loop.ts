@@ -47,7 +47,7 @@ export class AgentLoop {
 
     // 循环处理，直到没有工具调用
     let hasToolCalls = true
-    let maxIterations = 7 // 防止无限循环
+    let maxIterations = 20 // 防止无限循环
     let iteration = 0
 
     while (hasToolCalls && iteration < maxIterations) {
