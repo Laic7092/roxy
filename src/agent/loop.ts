@@ -1,90 +1,69 @@
-import { bus } from '../bus/instance'
 import type { LiteLLMProvider } from '../provider/llm'
 import type { ContextMng } from './context'
 import type { Session } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 
-// 定义工具调用回调类型
-export type ToolCallCallback = (toolName: string, args: any) => void
-export type ToolResultCallback = (toolName: string, result: any) => void
-
-interface Options {
-  session: Session
-  ctx: ContextMng
+export interface AgentLoopDeps {
   provider: LiteLLMProvider
-  model: string
   toolExecutor: ToolExecutor
 }
 
+export interface ProcessCallbacks {
+  onStream: (chunk: string) => void
+  onToolCall: (name: string, args: any) => void
+  onToolResult: (name: string, result: any) => void
+}
+
+/**
+ * AgentLoop - 无状态消息处理器
+ * 
+ * 职责单一：给定 Session 和 Context，处理用户消息并返回 AI 响应
+ * 不管理 Session 缓存，不管理 Context 缓存，不做路由决策
+ */
 export class AgentLoop {
-  provider: LiteLLMProvider
-  ctx: ContextMng
-  session: Session
-  model: string
-  toolExecutor: ToolExecutor
-
-  constructor({ session, ctx, provider, model, toolExecutor }: Options) {
-    this.session = session
-    this.ctx = ctx
-    this.provider = provider
-    this.model = model
-    this.toolExecutor = toolExecutor
-  }
+  constructor(private deps: AgentLoopDeps) {}
 
   /**
-   * 重新加载技能列表
+   * 核心方法：处理单条消息
+   * 
+   * @param msg 用户消息
+   * @param session 会话对象（由调用者管理）
+   * @param ctx 上下文对象（由调用者管理）
+   * @param callbacks 回调函数（用于流式输出和工具调用通知）
+   * @returns 最终的 AI 响应内容
    */
-  async reloadSkills(): Promise<void> {
-    await this.ctx.reloadSkills()
-  }
-
-  /**
-   * 获取当前可用的技能列表
-   */
-  async getAvailableSkills(): Promise<string[]> {
-    const sysMsgs = await this.ctx.buildContext([])
-    const skillsMsg = sysMsgs.find(msg => msg.role === 'system' && msg.content.includes('# Available Skills'))
-    if (!skillsMsg) return []
-
-    const content = skillsMsg.content
-    const lines = content.split('\n').filter(line => line.startsWith('- **'))
-    return lines.map(line => {
-      const match = line.match(/\*\*([^*]+)\*\*/)
-      return match ? match[1] : ''
-    }).filter(Boolean)
-  }
-
-  async msgHandler(
+  async process(
     msg: string,
-    onStreamData?: (data: string) => void,
-    onToolCall?: ToolCallCallback,
-    onToolResult?: ToolResultCallback,
-  ) {
-    this.session.addMessage('user', msg)
+    session: Session,
+    ctx: ContextMng,
+    callbacks: ProcessCallbacks,
+  ): Promise<string> {
+    session.addMessage('user', msg)
 
-    // 构建上下文 - 现在是异步的
-    let contextMessages = await this.ctx.buildContext(this.session.messages)
+    // 构建上下文
+    let contextMessages = await ctx.buildContext(session.messages)
 
     // 获取工具定义
-    const tools = await this.toolExecutor.getToolDefinitions()
+    const tools = await this.deps.toolExecutor.getToolDefinitions()
 
     // 循环处理，直到没有工具调用
     let hasToolCalls = true
-    let maxIterations = 20 // 防止无限循环
+    let maxIterations = 20
     let iteration = 0
+    let aiResponse = ''
 
     while (hasToolCalls && iteration < maxIterations) {
       iteration++
       hasToolCalls = false
 
-      // 调用启用流式处理的 API，传递流式数据回调和工具定义
-      let result = await this.provider.chat({
+      // 调用 LLM API
+      const result = await this.deps.provider.chat({
         messages: contextMessages,
-        model: this.model,
-        stream: true, // 启用流式处理
-        onStreamData, // 传递流式数据回调
-        tools, // 传递工具定义
-        tool_choice: 'auto', // 让模型自动决定何时使用工具
+        model: this.deps.provider.cfg.model,
+        stream: true,
+        onStreamData: callbacks.onStream,
+        tools,
+        tool_choice: 'auto',
       })
 
       // 检查是否需要执行工具调用
@@ -93,38 +72,30 @@ export class AgentLoop {
       if (toolCalls && toolCalls.length > 0) {
         hasToolCalls = true
 
-        // 通知UI有工具调用发生
+        // 通知调用者有工具调用发生
         for (const toolCall of toolCalls) {
-          if (onToolCall) {
-            try {
-              const args = JSON.parse(toolCall.function.arguments)
-              onToolCall(toolCall.function.name, args)
-            } catch (e) {
-              console.error('解析工具参数失败:', e)
-              console.error('原始参数:', toolCall.function.arguments)
-
-              // 向AI返回错误信息，让它知道参数解析失败
-              if (onToolCall) {
-                onToolCall(toolCall.function.name, { error: 'Invalid arguments format' })
-              }
-            }
+          try {
+            const args = JSON.parse(toolCall.function.arguments)
+            callbacks.onToolCall(toolCall.function.name, args)
+          } catch (e) {
+            console.error('解析工具参数失败:', e)
+            console.error('原始参数:', toolCall.function.arguments)
+            callbacks.onToolCall(toolCall.function.name, { error: 'Invalid arguments format' })
           }
         }
 
-        // 执行所有工具调用，保留AI提供的ID
-        const toolResults = await this.toolExecutor.executeTools(
+        // 执行所有工具调用
+        const toolResults = await this.deps.toolExecutor.executeTools(
           toolCalls.map((call) => ({
             name: call.function.name,
             arguments: call.function.arguments,
-            id: call.id, // 保留AI提供的ID
+            id: call.id,
           })),
         )
 
-        // 通知UI工具执行结果
+        // 通知调用者工具执行结果
         for (const toolResult of toolResults) {
-          if (onToolResult) {
-            onToolResult(toolResult.name, toolResult.result)
-          }
+          callbacks.onToolResult(toolResult.name, toolResult.result)
         }
 
         // 将工具调用结果添加到消息历史中
@@ -132,30 +103,32 @@ export class AgentLoop {
         let init = false
         for (const toolResult of toolResults) {
           if (!init) {
-            this.session.addMessage('assistant', content, tool_calls)
+            session.addMessage('assistant', content, tool_calls)
             init = true
           }
-          this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
+          session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
         }
 
-        // 重新构建上下文，包含工具调用的结果
-        contextMessages = await this.ctx.buildContext(this.session.messages)
+        // 重新构建上下文
+        contextMessages = await ctx.buildContext(session.messages)
       } else {
-        // 没有工具调用，处理最终的AI响应
+        // 没有工具调用，处理最终的 AI 响应
         if (result && result.choices && result.choices[0] && result.choices[0].message) {
           const { content } = result.choices[0].message
           if (content) {
-            this.session.addMessage('assistant', content)
+            session.addMessage('assistant', content)
+            aiResponse = content
           }
         }
-        break // 退出循环
+        break
       }
     }
 
     if (iteration >= maxIterations) {
       console.warn(`达到最大迭代次数 ${maxIterations}，停止工具调用循环`)
-      // 可以添加一条系统消息告知用户
-      this.session.addMessage('assistant', '工具调用次数过多，请简化您的请求。')
+      session.addMessage('assistant', '工具调用次数过多，请简化您的请求。')
     }
+
+    return aiResponse
   }
 }

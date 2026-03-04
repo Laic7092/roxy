@@ -146,7 +146,7 @@ export async function executeCommand(
               error,
               stdout,
               stderr: stderr || error.message,
-              code: error.code ? parseInt(error.code) : null,
+              code: typeof error.code === 'number' ? error.code : (error.code ? parseInt(error.code as string) : null),
               signal: error.signal as NodeJS.Signals | null
             })
           } else {

@@ -1,6 +1,6 @@
 # Roxy
 
-Roxy 是一个 AI 助手
+Roxy 是一个 AI 助手，支持 CLI 和 Web 多种交互方式。
 
 ## 安装
 
@@ -34,7 +34,7 @@ roxy onboard
 
 您需要编辑 `~/.roxy/config.json` 文件并添加您的 API 密钥。
 
-### 交互式对话
+### 交互式对话（CLI）
 
 启动交互式 AI 对话：
 
@@ -54,6 +54,29 @@ roxy agent --session my-session
 roxy agent --clear
 ```
 
+**会话持久化**：
+- 所有会话会自动保存到 `~/.roxy/sessions/` 目录
+- 每次消息处理后自动持久化，重启后会话历史依然存在
+- 使用相同 `--session` ID 可恢复之前的对话
+
+### Web 界面
+
+启动 Web 服务器：
+
+```bash
+roxy web
+```
+
+选项：
+- `-p, --port <port>` - 指定端口（默认：3000）
+- `--host <host>` - 指定主机（默认：127.0.0.1）
+- `--no-open` - 不自动打开浏览器
+
+**会话持久化**：
+- Web 会话同样会自动保存到 `~/.roxy/sessions/` 目录
+- 每个 WebSocket 连接拥有独立的会话
+- 刷新页面后，使用相同会话 ID 可恢复对话
+
 ## 命令
 
 ### `onboard`
@@ -69,15 +92,28 @@ roxy onboard [options]
 
 ### `agent`
 
-启动交互式 AI 代理：
+启动交互式 AI 代理（CLI 模式）：
 
 ```bash
 roxy agent [options]
 ```
 
 选项:
-- `-s, --session <sessionId>` - 指定要使用的会话 ID（默认为 "default"）
+- `-s, --session <sessionId>` - 指定要使用的会话 ID（默认为 "cli:default"）
 - `-c, --clear` - 清除当前会话历史
+
+### `web`
+
+启动 Web 服务器：
+
+```bash
+roxy web [options]
+```
+
+选项:
+- `-p, --port <port>` - 指定端口（默认：3000）
+- `--host <host>` - 指定主机（默认：127.0.0.1）
+- `--no-open` - 不自动打开浏览器
 
 ## 配置
 
@@ -88,10 +124,14 @@ roxy agent [options]
   "workspace": "/home/user/.roxy/workspace",
   "agents": {
     "defaults": {
-      "model": "deepseek/deepseek-chat"
+      "model": "ollama/qwen3.5:9b"
     }
   },
   "providers": {
+    "ollama": {
+      "apiKey": "ollama-local",
+      "baseURL": "http://localhost:11434/v1"
+    },
     "deepseek": {
       "apiKey": "your-api-key-here",
       "baseURL": "https://api.deepseek.com"
@@ -99,6 +139,41 @@ roxy agent [options]
   }
 }
 ```
+
+## 架构
+
+Roxy 采用分层架构设计：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Channel Layer                           │
+│  ┌──────────────┐          ┌──────────────┐                 │
+│  │  CLIChannel  │          │  WebChannel  │                 │
+│  └──────┬───────┘          └──────┬───────┘                 │
+│         └────────────┬────────────┘                          │
+│                      ▼                                       │
+│         ┌─────────────────────────┐                          │
+│         │       MessageBus        │                          │
+│         │  (双队列：inbound/outbound)                        │
+│         └────────────┬────────────┘                          │
+│                      ▼                                       │
+│         ┌─────────────────────────┐                          │
+│         │      AgentGateway       │                          │
+│         └─────────────────────────┘                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **Channel 层**：CLI 和 Web 通道，统一输入输出接口，**管理 Session 持久化**
+- **MessageBus**：双队列事件总线，解耦通道和核心逻辑
+- **AgentGateway**：统一处理所有通道的消息
+- **SessionManager**：按 sessionId 隔离会话，自动持久化到磁盘
+
+### 会话管理
+
+- 会话 ID 格式：`cli:{name}`（CLI）或 `web:{id}`（Web）
+- 存储位置：`~/.roxy/sessions/{sessionId}.jsonl`
+- 存储格式：JSONL（每行一条 JSON 消息）
+- 自动保存：每次消息处理完成后自动持久化
 
 ## 开发
 

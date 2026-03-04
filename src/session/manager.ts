@@ -98,7 +98,10 @@ export class SessionManager {
       const session = new Session(key)
       session.messages = lines.map((line) => JSON.parse(line))
       if (session.messages.length) {
-        session.updatedAt = new Date(session.messages[session.messages.length - 1].timestamp)
+        const lastMsg = session.messages[session.messages.length - 1]
+        if ('timestamp' in lastMsg && lastMsg.timestamp) {
+          session.updatedAt = new Date(lastMsg.timestamp)
+        }
       }
       return session
     } catch {
