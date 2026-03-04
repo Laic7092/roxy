@@ -1,46 +1,22 @@
 import { Command } from 'commander'
-import { initConfig } from '../../config/manager'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { access, readFile } from 'node:fs/promises'
-import { constants } from 'node:fs'
+import { initAll, CONFIG_PATH, WROKSPACE_PATH } from '../../config/manager'
+import chalk from 'chalk'
 
 export const OnboardCommand = new Command('onboard')
 
-OnboardCommand.description('Initialize workspace and config.json')
-  .option('-f, --force', 'Force re-initialization even if config exists')
+OnboardCommand.description('Initialize workspace and config')
+  .option('-f, --force', 'Force re-initialization')
   .action(async (options) => {
-    console.log('🚀 Starting Roxy onboarding process...')
+    console.log(chalk.cyan('\n🚀 Roxy Onboarding\n'))
 
     try {
-      // 检查配置文件是否存在
-      const configPath = join(homedir(), '.roxy', 'config.json')
-
-      try {
-        await access(configPath, constants.F_OK)
-        if (!options.force) {
-          console.log('⚠️  Configuration already exists. Use --force to reinitialize.')
-          const currentConfig = await readFile(configPath, 'utf-8')
-          console.log('Current config:\n', currentConfig)
-          return
-        }
-      } catch {
-        // 文件不存在，继续初始化
-      }
-
-      // 初始化配置
-      await initConfig()
-
-      console.log('\n✅ Workspace initialized successfully!')
-      console.log(`📁 Configuration file created at: ${configPath}`)
-
-      // 提示用户编辑配置文件
-      console.log('\n📝 Next steps:')
-      console.log(`   1. Open ${configPath} in your editor`)
-      console.log('   2. Add your API keys to the providers section')
-      console.log('   3. Save the file')
+      await initAll(options.force)
+      console.log(chalk.green('\n✅ Initialization complete!\n'))
+      console.log(chalk.gray(`Config:   ${CONFIG_PATH}`))
+      console.log(chalk.gray(`Workspace: ${WROKSPACE_PATH}/\n`))
+      console.log(chalk.yellow('Next: Edit config and add API keys, then run `roxy agent`\n'))
     } catch (error) {
-      console.error('❌ Failed to initialize workspace:', error.message)
+      console.error(chalk.red('❌ Failed:'), error.message)
       process.exit(1)
     }
   })
