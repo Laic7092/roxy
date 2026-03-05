@@ -17,7 +17,13 @@ export interface InboundMessage {
  * 出站消息类型
  * @deprecated 使用事件系统代替
  */
-export type OutboundMessageType = 'typing' | 'stream' | 'response' | 'tool_call' | 'tool_result' | 'error'
+export type OutboundMessageType =
+  | 'typing'
+  | 'stream'
+  | 'response'
+  | 'tool_call'
+  | 'tool_result'
+  | 'error'
 
 /**
  * 出站消息 - 从 Agent 到 Channel

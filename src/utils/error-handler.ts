@@ -1,6 +1,6 @@
 /**
  * Roxy 错误处理工具函数
- * 
+ *
  * 提供统一的错误处理、日志记录和转换功能
  */
 
@@ -28,7 +28,12 @@ export interface LogEntry {
 /**
  * 统一的日志记录函数
  */
-export function log(level: LogLevel, message: string, context?: string, metadata?: Record<string, any>): void {
+export function log(
+  level: LogLevel,
+  message: string,
+  context?: string,
+  metadata?: Record<string, any>,
+): void {
   const entry: LogEntry = {
     timestamp: new Date().toISOString(),
     level,
@@ -121,12 +126,16 @@ export function logError(error: RoxyError, level: LogLevel = 'error', context?: 
 
 /**
  * 将未知错误转换为 RoxyError
- * 
+ *
  * @param error 未知错误
  * @param context 错误发生的上下文
  * @param defaultCode 默认错误代码
  */
-export function handleError(error: unknown, context: string, defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR): RoxyError {
+export function handleError(
+  error: unknown,
+  context: string,
+  defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR,
+): RoxyError {
   if (error instanceof RoxyError) {
     // 已经是 RoxyError，直接返回
     return error
@@ -134,25 +143,18 @@ export function handleError(error: unknown, context: string, defaultCode: ErrorC
 
   if (error instanceof Error) {
     // 是普通 Error，包装为 RoxyError
-    return new RoxyError(
-      defaultCode,
-      `${context}: ${error.message}`,
-      error
-    )
+    return new RoxyError(defaultCode, `${context}: ${error.message}`, error)
   }
 
   // 是其他类型，创建新的 RoxyError
-  return new RoxyError(
-    defaultCode,
-    `${context}: ${String(error)}`,
-    undefined,
-    { originalError: error }
-  )
+  return new RoxyError(defaultCode, `${context}: ${String(error)}`, undefined, {
+    originalError: error,
+  })
 }
 
 /**
  * 处理错误并记录日志
- * 
+ *
  * @param error 未知错误
  * @param context 错误发生的上下文
  * @param level 日志级别
@@ -162,7 +164,7 @@ export function handleAndLogError(
   error: unknown,
   context: string,
   level: LogLevel = 'error',
-  defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR
+  defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR,
 ): RoxyError {
   const roxyError = handleError(error, context, defaultCode)
   logError(roxyError, level, context)
@@ -171,7 +173,7 @@ export function handleAndLogError(
 
 /**
  * 安全地执行异步函数，捕获并转换错误
- * 
+ *
  * @param fn 要执行的异步函数
  * @param context 错误发生的上下文
  * @param defaultCode 默认错误代码
@@ -180,7 +182,7 @@ export function handleAndLogError(
 export async function safeAsync<T>(
   fn: () => Promise<T>,
   context: string,
-  defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR
+  defaultCode: ErrorCode = ErrorCode.SYSTEM_ERROR,
 ): Promise<[T, null] | [null, RoxyError]> {
   try {
     const result = await fn()
@@ -193,9 +195,9 @@ export async function safeAsync<T>(
 
 /**
  * 创建错误恢复包装器
- * 
+ *
  * 自动重试可恢复的错误
- * 
+ *
  * @param fn 要执行的异步函数
  * @param context 错误发生的上下文
  * @param maxRetries 最大重试次数
@@ -205,7 +207,7 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   context: string,
   maxRetries: number = 3,
-  baseDelay: number = 1000
+  baseDelay: number = 1000,
 ): Promise<T> {
   let lastError: Error | undefined
 
@@ -222,12 +224,12 @@ export async function withRetry<T>(
 
       // 计算指数退避延迟
       const backoffMs = Math.min(baseDelay * Math.pow(2, attempt - 1), 10000)
-      
+
       log(
         'warn',
         `${context} failed, retrying (attempt ${attempt}/${maxRetries}) after ${backoffMs}ms`,
         undefined,
-        { error: lastError.message }
+        { error: lastError.message },
       )
 
       await sleep(backoffMs)
@@ -235,16 +237,12 @@ export async function withRetry<T>(
   }
 
   // 所有重试都失败
-  throw handleError(
-    lastError,
-    context,
-    ErrorCode.MAX_RETRIES_EXCEEDED
-  )
+  throw handleError(lastError, context, ErrorCode.MAX_RETRIES_EXCEEDED)
 }
 
 /**
  * 带超时的异步操作
- * 
+ *
  * @param promise 要执行的 Promise
  * @param timeoutMs 超时时间（毫秒）
  * @param context 错误发生的上下文
@@ -252,17 +250,16 @@ export async function withRetry<T>(
 export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  context: string
+  context: string,
 ): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
       setTimeout(() => {
-        reject(new RoxyError(
-          ErrorCode.TIMEOUT,
-          `${context}: Operation timed out after ${timeoutMs}ms`
-        ))
-      }, timeoutMs)
+        reject(
+          new RoxyError(ErrorCode.TIMEOUT, `${context}: Operation timed out after ${timeoutMs}ms`),
+        )
+      }, timeoutMs),
     ),
   ])
 }
@@ -271,7 +268,7 @@ export async function withTimeout<T>(
  * 睡眠指定时间
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -316,7 +313,7 @@ export function formatErrorMessage(error: RoxyError): string {
 
 /**
  * 创建错误跟踪器
- * 
+ *
  * 用于收集和统计错误信息
  */
 export class ErrorTracker {
@@ -366,9 +363,7 @@ export class ErrorTracker {
    * 检查错误率是否过高
    */
   isErrorRateHigh(threshold: number = 10): boolean {
-    const lastMinute = this.recentErrors.filter(
-      e => Date.now() - e.timestamp.getTime() < 60000
-    )
+    const lastMinute = this.recentErrors.filter((e) => Date.now() - e.timestamp.getTime() < 60000)
     return lastMinute.length > threshold
   }
 

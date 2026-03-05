@@ -58,12 +58,43 @@ export class AgentLoop {
    * 设置事件处理器
    */
   private setupEventHandlers(): void {
+    // 监听 agent:execute 事件
     this.eventBus.on('agent:execute', async (event) => {
       // 只处理分配给此 Agent 的任务
       if (event.task.agentId === this.config.id) {
         await this.executeTask(event.task)
       }
     })
+
+    // 监听 subagent:complete 事件
+    this.eventBus.on('subagent:complete', (event) => {
+      // 只处理属于当前会话的结果
+      if (this.session && event.parentSessionId === this.session.id) {
+        this.handleSubAgentComplete(event)
+      }
+    })
+  }
+
+  /**
+   * 处理 SubAgent 完成事件
+   */
+  private handleSubAgentComplete(event: any): void {
+    log(
+      'debug',
+      `SubAgent complete event received: sessionId=${event.parentSessionId}, currentSession=${this.session?.id}`,
+      'AgentLoop',
+    )
+
+    // 只处理属于当前会话的结果
+    if (!this.session || event.parentSessionId !== this.session.id) {
+      log('debug', `Session mismatch, skipping`, 'AgentLoop')
+      return
+    }
+
+    // 添加结果到会话
+    this.session.addMessage('assistant', event.result)
+
+    log('debug', `SubAgent [${event.taskId}] result saved to session`, 'AgentLoop')
   }
 
   /**
@@ -99,7 +130,7 @@ export class AgentLoop {
         if (elapsed >= AgentLoop.MAX_TIME_MS) {
           const timeoutError = new RoxyError(
             ErrorCode.TIMEOUT,
-            `Processing timeout (${AgentLoop.MAX_TIME_MS}ms) exceeded`
+            `Processing timeout (${AgentLoop.MAX_TIME_MS}ms) exceeded`,
           )
           logError(timeoutError, 'error', 'AgentLoop')
           this.session.addMessage('assistant', '处理超时，请简化您的请求。')
@@ -121,7 +152,7 @@ export class AgentLoop {
               tool_choice: 'auto',
             }),
             AgentLoop.LLM_TIMEOUT_MS,
-            'LLM chat'
+            'LLM chat',
           )
 
           // 检查是否需要执行工具调用
@@ -148,7 +179,7 @@ export class AgentLoop {
                   ErrorCode.TOOL_ARGUMENT_PARSE_ERROR,
                   `Failed to parse tool arguments for '${toolCall.function.name}'`,
                   e instanceof Error ? e : undefined,
-                  { rawArguments: toolCall.function.arguments }
+                  { rawArguments: toolCall.function.arguments },
                 )
                 logError(parseError, 'warn', 'AgentLoop')
               }
@@ -161,6 +192,7 @@ export class AgentLoop {
                 arguments: call.function.arguments,
                 id: call.id,
               })),
+              { channelId: task.channelId, sessionId: task.sessionId },
             )
 
             // 发布工具结果事件
@@ -210,13 +242,14 @@ export class AgentLoop {
             break
           }
         } catch (error) {
-          const roxyError = error instanceof RoxyError
-            ? error
-            : new RoxyError(
-                ErrorCode.LLM_API_ERROR,
-                `AgentLoop iteration ${iteration} failed`,
-                error instanceof Error ? error : undefined
-              )
+          const roxyError =
+            error instanceof RoxyError
+              ? error
+              : new RoxyError(
+                  ErrorCode.LLM_API_ERROR,
+                  `AgentLoop iteration ${iteration} failed`,
+                  error instanceof Error ? error : undefined,
+                )
 
           logError(roxyError, 'warn', 'AgentLoop')
 
@@ -242,20 +275,20 @@ export class AgentLoop {
       task.status = TaskStatus.COMPLETED
       task.result = aiResponse
       task.completedAt = new Date()
-
     } catch (error) {
       // 任务失败
       task.status = TaskStatus.FAILED
       task.error = error instanceof Error ? error.message : 'Unknown error'
       task.completedAt = new Date()
 
-      const roxyError = error instanceof RoxyError
-        ? error
-        : new RoxyError(
-            ErrorCode.SYSTEM_ERROR,
-            'AgentLoop.executeTask failed',
-            error instanceof Error ? error : undefined
-          )
+      const roxyError =
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.SYSTEM_ERROR,
+              'AgentLoop.executeTask failed',
+              error instanceof Error ? error : undefined,
+            )
 
       logError(roxyError, 'error', 'AgentLoop')
 

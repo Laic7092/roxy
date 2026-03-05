@@ -9,6 +9,8 @@ import { getEventBus } from '../../bus/instance'
 import { AgentFactory } from '../../agent/factory'
 import { AgentOrchestrator } from '../../orchestrator/orchestrator'
 import { AgentRole } from '../../agent/types'
+import { SubAgentManager } from '../../agent/subAgent'
+import { setSubAgentManager } from '../../tools/SpawnTool'
 
 export const AgentCommand = new Command('agent')
 
@@ -52,6 +54,16 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       // 初始化 ToolExecutor
       const toolExecutor = new ToolExecutor(workspace)
 
+      // 初始化 SubAgentManager 并注册到全局
+      const subAgentManager = new SubAgentManager({
+        provider,
+        eventBus,
+        sessionManager,
+        toolExecutor,
+        workspace,
+      })
+      setSubAgentManager(subAgentManager)
+
       // 创建 AgentFactory
       const agentFactory = new AgentFactory({
         eventBus,
@@ -93,7 +105,10 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
         process.exit(0)
       })
     } catch (error) {
-      if (error.message.includes('配置文件不存在') || error.message.includes('Configuration not found')) {
+      if (
+        error.message.includes('配置文件不存在') ||
+        error.message.includes('Configuration not found')
+      ) {
         console.error(chalk.red('❌ Configuration not found. Please run "roxy onboard" first.'))
       } else {
         console.error(chalk.red('❌ Failed to start agent:'), error.message)

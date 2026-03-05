@@ -47,7 +47,13 @@ export interface InboundMessage {
  * 出站消息类型
  * @deprecated 使用事件系统代替
  */
-export type OutboundMessageType = 'typing' | 'stream' | 'response' | 'tool_call' | 'tool_result' | 'error'
+export type OutboundMessageType =
+  | 'typing'
+  | 'stream'
+  | 'response'
+  | 'tool_call'
+  | 'tool_result'
+  | 'error'
 
 /**
  * 出站消息 - 从 Agent 到 Channel
@@ -180,6 +186,20 @@ export class EventBus {
    */
   publishAgentDelegate(data: EventMap['agent:delegate']): void {
     this.emit('agent:delegate', data)
+  }
+
+  /**
+   * 发布 SubAgent 任务开始事件
+   */
+  publishSubAgentStart(data: Omit<EventMap['subagent:start'], 'timestamp'>): void {
+    this.emit('subagent:start', { ...data, timestamp: new Date() })
+  }
+
+  /**
+   * 发布 SubAgent 任务完成事件
+   */
+  publishSubAgentComplete(data: Omit<EventMap['subagent:complete'], 'timestamp'>): void {
+    this.emit('subagent:complete', { ...data, timestamp: new Date() })
   }
 
   /**

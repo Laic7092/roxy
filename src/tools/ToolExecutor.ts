@@ -144,10 +144,16 @@ export class ToolExecutor {
     toolName: string,
     argumentsObj: any,
     providedId?: string,
+    context?: { channelId?: string; sessionId?: string },
   ): Promise<{ result: any; tool_call_id: string }> {
     // 等待初始化完成
     await this.initializationPromise
 
+    // 对于 spawn_subagent，设置执行上下文
+    if (toolName === 'spawn_subagent' && context) {
+      const { setExecContext } = await import('./SpawnTool')
+      setExecContext(context)
+    }
     const tool = this.tools.get(toolName)
 
     if (!tool) {
@@ -177,7 +183,10 @@ export class ToolExecutor {
    * 执行多个工具调用
    * @param toolCalls 工具调用数组，每个元素包含name, arguments和可选的id
    */
-  async executeTools(toolCalls: Array<{ name: string; arguments: string; id?: string }>): Promise<
+  async executeTools(
+    toolCalls: Array<{ name: string; arguments: string; id?: string }>,
+    context?: { channelId?: string; sessionId?: string },
+  ): Promise<
     Array<{
       result: any
       tool_call_id: string
@@ -191,7 +200,7 @@ export class ToolExecutor {
       toolCalls.map(async ({ name, arguments: argsStr, id }) => {
         try {
           const args = JSON.parse(argsStr)
-          const { result, tool_call_id } = await this.executeTool(name, args, id)
+          const { result, tool_call_id } = await this.executeTool(name, args, id, context)
 
           return {
             result,

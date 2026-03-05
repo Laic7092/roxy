@@ -188,10 +188,10 @@ export class SessionManager {
         new RoxyError(
           ErrorCode.SYSTEM_ERROR,
           `Failed to backup corrupted session file`,
-          error instanceof Error ? error : undefined
+          error instanceof Error ? error : undefined,
         ),
         'warn',
-        'SessionManager'
+        'SessionManager',
       )
     }
   }
@@ -229,10 +229,10 @@ export class SessionManager {
                 ErrorCode.SESSION_CORRUPTED,
                 `Invalid message format in session ${key}`,
                 undefined,
-                { line, message }
+                { line, message },
               ),
               'warn',
-              'SessionManager'
+              'SessionManager',
             )
           }
         } catch (e) {
@@ -242,10 +242,10 @@ export class SessionManager {
               ErrorCode.SESSION_CORRUPTED,
               `Failed to parse message in session ${key}`,
               e instanceof Error ? e : undefined,
-              { line }
+              { line },
             ),
             'warn',
-            'SessionManager'
+            'SessionManager',
           )
         }
       }
@@ -262,7 +262,11 @@ export class SessionManager {
 
       // 如果有损坏的数据，备份原文件
       if (corruptedLines > 0) {
-        log('warn', `Found ${corruptedLines} corrupted message(s) in session ${key}`, 'SessionManager')
+        log(
+          'warn',
+          `Found ${corruptedLines} corrupted message(s) in session ${key}`,
+          'SessionManager',
+        )
         await this.backupCorruptedFile(file, key)
         // 保存修复后的数据
         await this.save(key)
@@ -272,7 +276,6 @@ export class SessionManager {
       this.sessions.set(key, session)
 
       return session
-
     } catch (error) {
       // 文件不存在
       if ((error as any).code === 'ENOENT') {
@@ -286,7 +289,7 @@ export class SessionManager {
       const roxyError = new RoxyError(
         ErrorCode.SESSION_NOT_FOUND,
         `Failed to load session ${key}`,
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       )
       logError(roxyError, 'warn', 'SessionManager')
 
@@ -317,7 +320,7 @@ export class SessionManager {
       const roxyError = new RoxyError(
         ErrorCode.SYSTEM_ERROR,
         `Failed to save session ${sessionId}`,
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       )
       logError(roxyError, 'error', 'SessionManager')
       throw roxyError
@@ -338,7 +341,7 @@ export class SessionManager {
       const roxyError = new RoxyError(
         ErrorCode.SESSION_NOT_FOUND,
         `Failed to delete session ${key}`,
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       )
       logError(roxyError, 'warn', 'SessionManager')
       return false

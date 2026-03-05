@@ -1,6 +1,6 @@
 /**
  * Roxy 资源管理器
- * 
+ *
  * 用于安全地管理和清理资源，确保资源正确释放
  */
 
@@ -34,7 +34,7 @@ export interface CleanupResult {
 
 /**
  * 资源管理器类
- * 
+ *
  * 用于注册和管理需要清理的资源，确保在关闭或错误时正确释放资源
  */
 export class ResourceManager {
@@ -43,7 +43,7 @@ export class ResourceManager {
 
   /**
    * 注册资源
-   * 
+   *
    * @param type 资源类型标识
    * @param cleanup 清理函数
    */
@@ -64,11 +64,11 @@ export class ResourceManager {
 
   /**
    * 注销资源
-   * 
+   *
    * @param type 资源类型标识
    */
   unregister(type: string): void {
-    const index = this.resources.findIndex(r => r.type === type)
+    const index = this.resources.findIndex((r) => r.type === type)
     if (index !== -1) {
       this.resources.splice(index, 1)
       log('debug', `Resource unregistered: ${type}`, 'ResourceManager')
@@ -77,7 +77,7 @@ export class ResourceManager {
 
   /**
    * 清理所有资源
-   * 
+   *
    * 按注册顺序的逆序清理资源（后进先出）
    */
   async cleanupAll(): Promise<CleanupResult> {
@@ -106,10 +106,10 @@ export class ResourceManager {
           new RoxyError(
             ErrorCode.RESOURCE_CLEANUP_FAILED,
             `Failed to cleanup resource '${resource.type}'`,
-            err
+            err,
           ),
           'warn',
-          'ResourceManager'
+          'ResourceManager',
         )
       }
     }
@@ -143,7 +143,7 @@ export class ResourceManager {
    * 获取所有已注册的资源类型
    */
   getResourceTypes(): string[] {
-    return this.resources.map(r => r.type)
+    return this.resources.map((r) => r.type)
   }
 
   /**
@@ -155,7 +155,7 @@ export class ResourceManager {
 
   /**
    * 清空所有资源（不清理）
-   * 
+   *
    * 用于特殊情况，当资源已被外部清理时
    */
   clear(): void {
@@ -167,7 +167,7 @@ export class ResourceManager {
 
 /**
  * 带超时的资源清理装饰器
- * 
+ *
  * @param cleanup 原始清理函数
  * @param timeoutMs 超时时间（毫秒）
  */
@@ -177,11 +177,10 @@ export function withCleanupTimeout(cleanup: CleanupFn, timeoutMs: number = 5000)
       cleanup(),
       new Promise<never>((_, reject) =>
         setTimeout(() => {
-          reject(new RoxyError(
-            ErrorCode.TIMEOUT,
-            `Resource cleanup timed out after ${timeoutMs}ms`
-          ))
-        }, timeoutMs)
+          reject(
+            new RoxyError(ErrorCode.TIMEOUT, `Resource cleanup timed out after ${timeoutMs}ms`),
+          )
+        }, timeoutMs),
       ),
     ])
   }
@@ -189,9 +188,9 @@ export function withCleanupTimeout(cleanup: CleanupFn, timeoutMs: number = 5000)
 
 /**
  * 安全的资源清理包装器
- * 
+ *
  * 即使清理函数抛出错误也不会中断流程
- * 
+ *
  * @param cleanup 清理函数
  * @param resourceType 资源类型（用于日志）
  */
@@ -204,10 +203,10 @@ export function safeCleanup(cleanup: CleanupFn, resourceType: string): CleanupFn
         new RoxyError(
           ErrorCode.RESOURCE_CLEANUP_FAILED,
           `Failed to cleanup ${resourceType}`,
-          error instanceof Error ? error : undefined
+          error instanceof Error ? error : undefined,
         ),
         'warn',
-        'ResourceManager'
+        'ResourceManager',
       )
       // 吞没错误，继续清理其他资源
     }

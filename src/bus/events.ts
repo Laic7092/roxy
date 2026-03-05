@@ -115,6 +115,44 @@ export interface AgentDelegateEvent {
 }
 
 /**
+ * SubAgent 任务开始事件（SubAgent → Parent）
+ */
+export interface SubAgentStartEvent {
+  /** SubAgent 任务 ID */
+  taskId: string
+  /** 任务标签 */
+  label: string
+  /** 任务内容 */
+  task: string
+  /** 父 Agent 的通道 ID */
+  parentChannelId: string
+  /** 父 Agent 的会话 ID */
+  parentSessionId: string
+  timestamp: Date
+}
+
+/**
+ * SubAgent 任务完成事件（SubAgent → Parent）
+ */
+export interface SubAgentCompleteEvent {
+  /** SubAgent 任务 ID */
+  taskId: string
+  /** 任务标签 */
+  label: string
+  /** 父 Agent 的通道 ID */
+  parentChannelId: string
+  /** 父 Agent 的会话 ID */
+  parentSessionId: string
+  /** 任务结果 */
+  result: string
+  /** 是否成功 */
+  success: boolean
+  /** 错误信息（失败时） */
+  error?: string
+  timestamp: Date
+}
+
+/**
  * Team 广播事件（Team Lead → Members）
  */
 export interface TeamBroadcastEvent {
@@ -179,6 +217,8 @@ export interface EventMap {
 
   // SubAgent 委托
   'agent:delegate': AgentDelegateEvent
+  'subagent:start': SubAgentStartEvent
+  'subagent:complete': SubAgentCompleteEvent
 
   // Team 协作
   'team:broadcast': TeamBroadcastEvent
@@ -187,7 +227,7 @@ export interface EventMap {
   'session:save': SessionSaveEvent
 
   // 错误处理
-  'error': ErrorEvent
+  error: ErrorEvent
 }
 
 // 导入类型

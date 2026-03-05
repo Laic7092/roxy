@@ -73,7 +73,7 @@ export class AgentFactory {
   async createSubAgent(
     parentId: string,
     specialty: string,
-    systemPrompt?: string
+    systemPrompt?: string,
   ): Promise<AgentLoop> {
     const subAgentId = `sub-${specialty}-${uuidv4().slice(0, 8)}`
 

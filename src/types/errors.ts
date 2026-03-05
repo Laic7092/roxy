@@ -1,6 +1,6 @@
 /**
  * Roxy 错误类型定义
- * 
+ *
  * 提供统一的错误分类和错误对象，便于错误处理和监控
  */
 
@@ -61,7 +61,7 @@ export enum ErrorCode {
 
 /**
  * Roxy 统一错误类
- * 
+ *
  * 用于包装所有错误，提供错误代码、原因和元数据
  */
 export class RoxyError extends Error {
@@ -75,7 +75,7 @@ export class RoxyError extends Error {
     public code: ErrorCode,
     message: string,
     public cause?: Error,
-    public metadata?: Record<string, any>
+    public metadata?: Record<string, any>,
   ) {
     super(message)
     this.name = 'RoxyError'
@@ -103,24 +103,24 @@ export class RoxyError extends Error {
   /**
    * 从未知错误创建 RoxyError
    */
-  static from(error: unknown, code: ErrorCode = ErrorCode.UNKNOWN_ERROR, context?: string): RoxyError {
+  static from(
+    error: unknown,
+    code: ErrorCode = ErrorCode.UNKNOWN_ERROR,
+    context?: string,
+  ): RoxyError {
     if (error instanceof RoxyError) {
       return error
     }
 
     if (error instanceof Error) {
-      return new RoxyError(
-        code,
-        context ? `${context}: ${error.message}` : error.message,
-        error
-      )
+      return new RoxyError(code, context ? `${context}: ${error.message}` : error.message, error)
     }
 
     return new RoxyError(
       code,
       context ? `${context}: ${String(error)}` : String(error),
       undefined,
-      { originalError: error }
+      { originalError: error },
     )
   }
 
@@ -136,54 +136,38 @@ export class RoxyError extends Error {
    */
   static http(status: number, message?: string, cause?: Error): RoxyError {
     const msg = message || `HTTP error! status: ${status}`
-    return new RoxyError(
-      ErrorCode.HTTP_ERROR,
-      msg,
-      cause,
-      { statusCode: status }
-    )
+    return new RoxyError(ErrorCode.HTTP_ERROR, msg, cause, { statusCode: status })
   }
 
   /**
    * 创建工具错误
    */
   static tool(toolName: string, message: string, cause?: Error): RoxyError {
-    return new RoxyError(
-      ErrorCode.TOOL_EXECUTION_FAILED,
-      `Tool '${toolName}': ${message}`,
-      cause,
-      { toolName }
-    )
+    return new RoxyError(ErrorCode.TOOL_EXECUTION_FAILED, `Tool '${toolName}': ${message}`, cause, {
+      toolName,
+    })
   }
 
   /**
    * 创建会话错误
    */
   static session(sessionId: string, message: string, cause?: Error): RoxyError {
-    return new RoxyError(
-      ErrorCode.SESSION_NOT_FOUND,
-      `Session '${sessionId}': ${message}`,
-      cause,
-      { sessionId }
-    )
+    return new RoxyError(ErrorCode.SESSION_NOT_FOUND, `Session '${sessionId}': ${message}`, cause, {
+      sessionId,
+    })
   }
 
   /**
    * 创建 LLM API 错误
    */
   static llm(message: string, cause?: Error, metadata?: Record<string, any>): RoxyError {
-    return new RoxyError(
-      ErrorCode.LLM_API_ERROR,
-      message,
-      cause,
-      metadata
-    )
+    return new RoxyError(ErrorCode.LLM_API_ERROR, message, cause, metadata)
   }
 }
 
 /**
  * 判断错误是否为可恢复错误
- * 
+ *
  * 可恢复错误包括：网络错误、超时、速率限制等
  */
 export function isRecoverableError(error: Error): boolean {
@@ -212,7 +196,7 @@ export function isRecoverableError(error: Error): boolean {
   ]
 
   const message = error.message.toLowerCase()
-  return recoverableMessages.some(keyword => message.includes(keyword))
+  return recoverableMessages.some((keyword) => message.includes(keyword))
 }
 
 /**

@@ -92,10 +92,10 @@ export class AgentOrchestrator {
           : new RoxyError(
               ErrorCode.SYSTEM_ERROR,
               'Failed to handle user message',
-              error instanceof Error ? error : undefined
+              error instanceof Error ? error : undefined,
             ),
         'error',
-        'Orchestrator'
+        'Orchestrator',
       )
 
       // 发布错误事件
@@ -155,10 +155,10 @@ export class AgentOrchestrator {
           : new RoxyError(
               ErrorCode.SYSTEM_ERROR,
               'Failed to handle delegation request',
-              error instanceof Error ? error : undefined
+              error instanceof Error ? error : undefined,
             ),
         'error',
-        'Orchestrator'
+        'Orchestrator',
       )
     }
   }
@@ -174,7 +174,7 @@ export class AgentOrchestrator {
       logError(
         new RoxyError(ErrorCode.SYSTEM_ERROR, `Team ${teamId} not found`),
         'warn',
-        'Orchestrator'
+        'Orchestrator',
       )
       return
     }
@@ -182,9 +182,7 @@ export class AgentOrchestrator {
     // 分发给团队成员
     if (parallel) {
       // 并行执行
-      await Promise.all(
-        team.members.map((member) => this.broadcastToMember(team, member, task))
-      )
+      await Promise.all(team.members.map((member) => this.broadcastToMember(team, member, task)))
     } else {
       // 串行执行
       for (const member of team.members) {
@@ -199,7 +197,7 @@ export class AgentOrchestrator {
   private async broadcastToMember(
     team: AgentTeam,
     member: TeamMember,
-    task: string
+    task: string,
   ): Promise<void> {
     const memberTask: AgentTask = {
       id: uuidv4(),

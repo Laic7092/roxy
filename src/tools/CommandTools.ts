@@ -4,12 +4,40 @@ import { access, appendFile, constants } from 'fs/promises'
 
 // 命令黑名单（防止危险命令）
 const COMMAND_BLACKLIST = [
-  'rm', 'rmdir', 'del', 'rd', 'format', 'fdisk', 'mkfs',
-  'dd', 'shutdown', 'reboot', 'halt', 'poweroff',
-  'kill', 'pkill', 'killall', 'sudo', 'su', 'chmod',
-  'chown', 'chattr', 'passwd', 'useradd', 'userdel',
-  'wget', 'nc', 'netcat', 'telnet', 'ssh',
-  'scp', 'rsync', 'ftp', 'sftp', 'mount', 'umount'
+  'rm',
+  'rmdir',
+  'del',
+  'rd',
+  'format',
+  'fdisk',
+  'mkfs',
+  'dd',
+  'shutdown',
+  'reboot',
+  'halt',
+  'poweroff',
+  'kill',
+  'pkill',
+  'killall',
+  'sudo',
+  'su',
+  'chmod',
+  'chown',
+  'chattr',
+  'passwd',
+  'useradd',
+  'userdel',
+  'wget',
+  'nc',
+  'netcat',
+  'telnet',
+  'ssh',
+  'scp',
+  'rsync',
+  'ftp',
+  'sftp',
+  'mount',
+  'umount',
 ]
 
 // 日志配置
@@ -47,17 +75,29 @@ function isBlacklistedCommand(command: string): boolean {
  */
 function isSensitivePath(path: string): boolean {
   const sensitivePaths = [
-    '/etc', '/var', '/usr', '/root',
-    '/proc', '/sys', '/boot', '/dev',
-    '/bin', '/sbin', '/lib', '/lib64',
-    '/opt', '/media', '/mnt'
+    '/etc',
+    '/var',
+    '/usr',
+    '/root',
+    '/proc',
+    '/sys',
+    '/boot',
+    '/dev',
+    '/bin',
+    '/sbin',
+    '/lib',
+    '/lib64',
+    '/opt',
+    '/media',
+    '/mnt',
   ]
 
   const normalizedPath = path.toLowerCase()
-  return sensitivePaths.some(sensitive =>
-    normalizedPath === sensitive ||
-    normalizedPath.startsWith(sensitive + '/') ||
-    normalizedPath.startsWith(sensitive + '\\')
+  return sensitivePaths.some(
+    (sensitive) =>
+      normalizedPath === sensitive ||
+      normalizedPath.startsWith(sensitive + '/') ||
+      normalizedPath.startsWith(sensitive + '\\'),
   )
 }
 
@@ -72,10 +112,10 @@ export async function executeCommand(
   command: string,
   workspace: string,
   options: {
-    timeout?: number           // 超时时间（毫秒）
-    maxBuffer?: number         // 最大缓冲区大小（字节）
+    timeout?: number // 超时时间（毫秒）
+    maxBuffer?: number // 最大缓冲区大小（字节）
     env?: Record<string, string> // 额外的环境变量
-    shell?: string             // 使用的shell，默认 /bin/sh
+    shell?: string // 使用的shell，默认 /bin/sh
     allowBlacklisted?: boolean // 是否允许黑名单命令（谨慎使用）
   } = {},
 ): Promise<{
@@ -146,8 +186,13 @@ export async function executeCommand(
               error,
               stdout,
               stderr: stderr || error.message,
-              code: typeof error.code === 'number' ? error.code : (error.code ? parseInt(error.code as string) : null),
-              signal: error.signal as NodeJS.Signals | null
+              code:
+                typeof error.code === 'number'
+                  ? error.code
+                  : error.code
+                    ? parseInt(error.code as string)
+                    : null,
+              signal: error.signal as NodeJS.Signals | null,
             })
           } else {
             resolve({ stdout, stderr, code: 0, signal: null })
@@ -207,19 +252,21 @@ export async function executeCommand(
 export const commandTools = [
   {
     name: 'executeCommand',
-    description: 'Execute a command in the workspace with full shell support (pipes, redirections, variables)',
+    description:
+      'Execute a command in the workspace with full shell support (pipes, redirections, variables)',
     parameters: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: 'Command to execute (can include pipes, redirections, environment variables)',
+          description:
+            'Command to execute (can include pipes, redirections, environment variables)',
           examples: [
             'ls -la',
             'cat file.txt | grep "pattern"',
             'echo $PATH',
-            'npm install && npm run build'
-          ]
+            'npm install && npm run build',
+          ],
         },
         options: {
           type: 'object',
@@ -228,29 +275,29 @@ export const commandTools = [
               type: 'number',
               description: 'Timeout in milliseconds (default: 30000, 0 for no timeout)',
               minimum: 0,
-              maximum: 600000 // 10分钟最大
+              maximum: 600000, // 10分钟最大
             },
             maxBuffer: {
               type: 'number',
               description: 'Max output buffer size in bytes (default: 10485760, 10MB)',
               minimum: 1024,
-              maximum: 104857600 // 100MB最大
+              maximum: 104857600, // 100MB最大
             },
             env: {
               type: 'object',
               description: 'Additional environment variables',
-              additionalProperties: { type: 'string' }
+              additionalProperties: { type: 'string' },
             },
             allowBlacklisted: {
               type: 'boolean',
               description: 'Allow potentially dangerous commands (use with caution)',
-              default: false
-            }
+              default: false,
+            },
           },
-          description: 'Execution options'
-        }
+          description: 'Execution options',
+        },
       },
-      required: ['command']
+      required: ['command'],
     },
     execute: async (
       args: {
@@ -262,9 +309,9 @@ export const commandTools = [
           allowBlacklisted?: boolean
         }
       },
-      workspace: string
+      workspace: string,
     ) => {
       return await executeCommand(args.command, workspace, args.options || {})
-    }
-  }
+    },
+  },
 ]

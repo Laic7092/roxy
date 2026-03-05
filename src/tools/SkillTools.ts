@@ -3,7 +3,8 @@ import { SkillsLoader } from '../agent/skill'
 export const skillTools = [
   {
     name: 'load_skill',
-    description: "Load a skill's full instructions by name. Use this when you need detailed information about how to use a specific skill.",
+    description:
+      "Load a skill's full instructions by name. Use this when you need detailed information about how to use a specific skill.",
     parameters: {
       type: 'object',
       properties: {

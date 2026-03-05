@@ -9,7 +9,7 @@ export class LiteLLMProvider extends LLMProvider {
 
   /**
    * 带重试机制的 chat 方法
-   * 
+   *
    * @param ctx 上下文
    * @param maxRetries 最大重试次数
    */
@@ -29,23 +29,22 @@ export class LiteLLMProvider extends LLMProvider {
 
         // 计算指数退避延迟
         const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
-        
+
         log(
           'warn',
           `LLM call failed，重试中 (attempt ${attempt}/${maxRetries}) after ${backoffMs}ms`,
           'LiteLLMProvider',
-          { error: lastError.message }
+          { error: lastError.message },
         )
 
         await sleep(backoffMs)
       }
     }
 
-    const roxyError = RoxyError.llm(
-      `LLM call failed after ${maxRetries} attempts`,
-      lastError,
-      { lastError: lastError?.message, attempts: maxRetries }
-    )
+    const roxyError = RoxyError.llm(`LLM call failed after ${maxRetries} attempts`, lastError, {
+      lastError: lastError?.message,
+      attempts: maxRetries,
+    })
     logError(roxyError, 'error', 'LiteLLMProvider')
     throw roxyError
   }
@@ -70,7 +69,7 @@ export class LiteLLMProvider extends LLMProvider {
     ]
 
     const message = error.message.toLowerCase()
-    return retryableMessages.some(keyword => message.includes(keyword))
+    return retryableMessages.some((keyword) => message.includes(keyword))
   }
 
   async chat(ctx: Ctx): Promise<any> {
@@ -125,20 +124,18 @@ export class LiteLLMProvider extends LLMProvider {
 
         // 检查是否为速率限制
         if (response.status === 429) {
-          throw RoxyError.llm(
-            `Rate limited: ${response.status}`,
-            undefined,
-            { statusCode: response.status, responseBody: errorMessage }
-          )
+          throw RoxyError.llm(`Rate limited: ${response.status}`, undefined, {
+            statusCode: response.status,
+            responseBody: errorMessage,
+          })
         }
 
         // 检查是否为服务器错误
         if (response.status >= 500) {
-          throw RoxyError.llm(
-            `Server error: ${response.status}`,
-            undefined,
-            { statusCode: response.status, responseBody: errorMessage }
-          )
+          throw RoxyError.llm(`Server error: ${response.status}`, undefined, {
+            statusCode: response.status,
+            responseBody: errorMessage,
+          })
         }
 
         throw RoxyError.http(response.status, errorMessage)
@@ -235,7 +232,7 @@ export class LiteLLMProvider extends LLMProvider {
                 const parseError = new RoxyError(
                   ErrorCode.SSE_PARSE_ERROR,
                   'Failed to parse SSE data',
-                  e instanceof Error ? e : undefined
+                  e instanceof Error ? e : undefined,
                 )
                 logError(parseError, 'warn', 'LiteLLMProvider')
                 // 继续处理，不中断
@@ -275,10 +272,7 @@ export class LiteLLMProvider extends LLMProvider {
 
       // 网络错误
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        const networkError = RoxyError.network(
-          `Network error: ${error.message}`,
-          error
-        )
+        const networkError = RoxyError.network(`Network error: ${error.message}`, error)
         logError(networkError, 'error', 'LiteLLMProvider')
         throw networkError
       }

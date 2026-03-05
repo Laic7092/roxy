@@ -72,13 +72,14 @@ export class WebChannel extends BaseChannel {
         sessionId: this.sessionId,
       })
     } catch (error) {
-      const roxyError = error instanceof RoxyError
-        ? error
-        : new RoxyError(
-            ErrorCode.CHANNEL_CONNECTION_FAILED,
-            'Failed to start Web channel',
-            error instanceof Error ? error : undefined
-          )
+      const roxyError =
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.CHANNEL_CONNECTION_FAILED,
+              'Failed to start Web channel',
+              error instanceof Error ? error : undefined,
+            )
       logError(roxyError, 'error', 'WebChannel')
       throw roxyError
     }
@@ -90,13 +91,15 @@ export class WebChannel extends BaseChannel {
       await this.resourceManager.cleanupAll()
     } catch (error) {
       logError(
-        error instanceof RoxyError ? error : new RoxyError(
-          ErrorCode.RESOURCE_CLEANUP_FAILED,
-          'Failed to cleanup Web channel resources',
-          error instanceof Error ? error : undefined
-        ),
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.RESOURCE_CLEANUP_FAILED,
+              'Failed to cleanup Web channel resources',
+              error instanceof Error ? error : undefined,
+            ),
         'warn',
-        'WebChannel'
+        'WebChannel',
       )
     }
   }

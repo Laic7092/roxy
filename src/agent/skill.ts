@@ -57,10 +57,7 @@ export class SkillsLoader {
     if (this.watchInitialized) return
     this.watchInitialized = true
 
-    const dirsToWatch = [
-      join(this.workspace, 'skills'),
-      this.builtinDir,
-    ]
+    const dirsToWatch = [join(this.workspace, 'skills'), this.builtinDir]
 
     for (const dir of dirsToWatch) {
       try {

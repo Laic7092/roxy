@@ -10,7 +10,7 @@ import { logError } from '../utils/error-handler'
 
 /**
  * CLI Channel - 命令行交互通道
- * 
+ *
  * 负责处理用户输入和显示 AI 响应
  */
 export class CLIChannel extends BaseChannel {
@@ -46,13 +46,14 @@ export class CLIChannel extends BaseChannel {
       this.setupInterruptHandler()
       this.showPrompt()
     } catch (error) {
-      const roxyError = error instanceof RoxyError
-        ? error
-        : new RoxyError(
-          ErrorCode.CHANNEL_CONNECTION_FAILED,
-          'Failed to start CLI channel',
-          error instanceof Error ? error : undefined
-        )
+      const roxyError =
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.CHANNEL_CONNECTION_FAILED,
+              'Failed to start CLI channel',
+              error instanceof Error ? error : undefined,
+            )
       logError(roxyError, 'error', 'CLIChannel')
       throw roxyError
     }
@@ -63,13 +64,15 @@ export class CLIChannel extends BaseChannel {
       await this.resourceManager.cleanupAll()
     } catch (error) {
       logError(
-        error instanceof RoxyError ? error : new RoxyError(
-          ErrorCode.RESOURCE_CLEANUP_FAILED,
-          'Failed to cleanup CLI channel resources',
-          error instanceof Error ? error : undefined
-        ),
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.RESOURCE_CLEANUP_FAILED,
+              'Failed to cleanup CLI channel resources',
+              error instanceof Error ? error : undefined,
+            ),
         'warn',
-        'CLIChannel'
+        'CLIChannel',
       )
     } finally {
       this.rl = null
@@ -146,6 +149,15 @@ export class CLIChannel extends BaseChannel {
       if (event.channelId === this.id) {
         this.showToolResult(event.toolName, event.toolResult, event.error)
       }
+    })
+
+    // SubAgent 独立事件
+    this.eventBus.on('subagent:start', (event) => {
+      this.showSubAgentStart(event)
+    })
+
+    this.eventBus.on('subagent:complete', (event) => {
+      this.showSubAgentComplete(event)
     })
 
     this.eventBus.on('error', (event) => {
@@ -250,6 +262,7 @@ export class CLIChannel extends BaseChannel {
       this.spinner.stop()
       this.spinner = null
     }
+
     process.stdout.write('\n')
     this.isWaitingResponse = false
     this.aiResponse = ''
@@ -287,6 +300,45 @@ export class CLIChannel extends BaseChannel {
     }
 
     this.spinner = null
+  }
+
+  private showSubAgentStart(event: any): void {
+    // 停止可能的 spinner
+    if (this.spinner?.isSpinning) {
+      this.spinner.stop()
+    }
+
+    // 显示 SubAgent 启动通知
+    console.log(chalk.cyan.dim(`\n└─ 🚀 SubAgent [${event.label}] started`))
+    console.log(
+      chalk.gray.dim(`   Task: ${event.task.slice(0, 100)}${event.task.length > 100 ? '...' : ''}`),
+    )
+    console.log()
+  }
+
+  private showSubAgentComplete(event: any): void {
+    // 停止可能的 spinner
+    if (this.spinner?.isSpinning) {
+      this.spinner.stop()
+    }
+
+    // 显示 SubAgent 完成状态
+    const statusIcon = event.success ? chalk.green('✅') : chalk.red('❌')
+    const statusText = event.success ? 'completed' : 'failed'
+
+    console.log(chalk.dim(`\n└─ ${statusIcon} SubAgent [${event.label}] ${statusText}`))
+
+    // 显示结果
+    if (event.result) {
+      console.log(chalk.gray(event.result))
+    }
+
+    console.log()
+
+    // 重置状态并显示提示符
+    this.isWaitingResponse = false
+    this.aiResponse = ''
+    this.showPrompt()
   }
 
   private showError(content: string): void {
