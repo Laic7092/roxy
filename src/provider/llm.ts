@@ -1,8 +1,76 @@
 import LLMProvider from './base'
+import { RoxyError, ErrorCode, isRecoverableError } from '../types/errors'
+import { logError, log, sleep } from '../utils/error-handler'
 
 export class LiteLLMProvider extends LLMProvider {
   constructor(cfg) {
     super(cfg)
+  }
+
+  /**
+   * 带重试机制的 chat 方法
+   * 
+   * @param ctx 上下文
+   * @param maxRetries 最大重试次数
+   */
+  async chatWithRetry(ctx: Ctx, maxRetries: number = 3): Promise<any> {
+    let lastError: Error | undefined
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.chat(ctx)
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+
+        // 检查是否应该重试
+        if (!this.shouldRetry(lastError) || attempt === maxRetries) {
+          break
+        }
+
+        // 计算指数退避延迟
+        const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+        
+        log(
+          'warn',
+          `LLM call failed，重试中 (attempt ${attempt}/${maxRetries}) after ${backoffMs}ms`,
+          'LiteLLMProvider',
+          { error: lastError.message }
+        )
+
+        await sleep(backoffMs)
+      }
+    }
+
+    const roxyError = RoxyError.llm(
+      `LLM call failed after ${maxRetries} attempts`,
+      lastError,
+      { lastError: lastError?.message, attempts: maxRetries }
+    )
+    logError(roxyError, 'error', 'LiteLLMProvider')
+    throw roxyError
+  }
+
+  /**
+   * 判断错误是否应该重试
+   */
+  private shouldRetry(error: Error): boolean {
+    // 可重试的错误关键字
+    const retryableMessages = [
+      'network',
+      'timeout',
+      'rate limit',
+      'too many requests',
+      'server error',
+      'gateway',
+      'service unavailable',
+      'temporarily unavailable',
+      'econnreset',
+      'econnrefused',
+      'enotfound',
+    ]
+
+    const message = error.message.toLowerCase()
+    return retryableMessages.some(keyword => message.includes(keyword))
   }
 
   async chat(ctx: Ctx): Promise<any> {
@@ -47,17 +115,33 @@ export class LiteLLMProvider extends LLMProvider {
         // 尝试获取响应体内容作为错误信息
         let errorMessage = `HTTP error! status: ${response.status}`
         try {
-          const errorBody = await response.text() // 获取响应体文本
+          const errorBody = await response.text()
           if (errorBody) {
             errorMessage += `\nResponse body: ${errorBody}`
           }
         } catch (e) {
-          // 如果无法读取响应体，则记录原始错误
-          console.warn('Could not read error response body:', e)
+          log('warn', 'Could not read error response body', 'LiteLLMProvider')
         }
 
-        console.error('请求失败:', errorMessage)
-        throw new Error(errorMessage)
+        // 检查是否为速率限制
+        if (response.status === 429) {
+          throw RoxyError.llm(
+            `Rate limited: ${response.status}`,
+            undefined,
+            { statusCode: response.status, responseBody: errorMessage }
+          )
+        }
+
+        // 检查是否为服务器错误
+        if (response.status >= 500) {
+          throw RoxyError.llm(
+            `Server error: ${response.status}`,
+            undefined,
+            { statusCode: response.status, responseBody: errorMessage }
+          )
+        }
+
+        throw RoxyError.http(response.status, errorMessage)
       }
 
       // 如果是流式响应，处理 SSE 数据
@@ -67,7 +151,7 @@ export class LiteLLMProvider extends LLMProvider {
 
         let buffer = ''
         let fullContent = ''
-        let toolCalls: any[] = [] // 存储工具调用
+        let toolCalls: any[] = []
 
         while (true) {
           const { done, value } = await reader.read()
@@ -78,14 +162,13 @@ export class LiteLLMProvider extends LLMProvider {
 
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split('\n')
-          buffer = lines.pop() || '' // 保留不完整的最后一行
+          buffer = lines.pop() || ''
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
-              const data = line.substring(6) // 移除 'data: ' 前缀
+              const data = line.substring(6)
 
               if (data === '[DONE]') {
-                // 返回最终结果，可能包含内容或工具调用
                 const result: any = {
                   choices: [
                     {
@@ -113,11 +196,9 @@ export class LiteLLMProvider extends LLMProvider {
                 // 检查是否有内容
                 const content = parsed.choices?.[0]?.delta?.content
                 if (content) {
-                  // 使用回调函数输出流式内容，而不是直接写入 stdout
                   if (onStreamData) {
                     onStreamData(content)
                   }
-                  // 累积内容
                   fullContent += content
                 }
 
@@ -127,7 +208,6 @@ export class LiteLLMProvider extends LLMProvider {
                   for (const toolCallDelta of delta.tool_calls) {
                     const index = toolCallDelta.index
 
-                    // 确保toolCalls数组中有对应索引的位置
                     if (!toolCalls[index]) {
                       toolCalls[index] = {
                         id: '',
@@ -139,7 +219,6 @@ export class LiteLLMProvider extends LLMProvider {
                       }
                     }
 
-                    // 更新工具调用信息
                     if (toolCallDelta.id) {
                       toolCalls[index].id = toolCallDelta.id
                     }
@@ -152,13 +231,19 @@ export class LiteLLMProvider extends LLMProvider {
                   }
                 }
               } catch (e) {
-                console.warn('Failed to parse SSE data:', e)
+                // SSE 解析错误，记录并跳过
+                const parseError = new RoxyError(
+                  ErrorCode.SSE_PARSE_ERROR,
+                  'Failed to parse SSE data',
+                  e instanceof Error ? e : undefined
+                )
+                logError(parseError, 'warn', 'LiteLLMProvider')
+                // 继续处理，不中断
               }
             }
           }
         }
 
-        // 返回最终结果，可能包含内容或工具调用
         const result: any = {
           choices: [
             {
@@ -179,14 +264,29 @@ export class LiteLLMProvider extends LLMProvider {
 
         return result
       } else {
-        // 非流式响应，按原方式处理
         const data = await response.json()
-        console.log(data)
         return data
       }
     } catch (error) {
-      console.error('请求失败:', error.message)
-      throw error
+      // 已经是 RoxyError，直接抛出
+      if (error instanceof RoxyError) {
+        throw error
+      }
+
+      // 网络错误
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        const networkError = RoxyError.network(
+          `Network error: ${error.message}`,
+          error
+        )
+        logError(networkError, 'error', 'LiteLLMProvider')
+        throw networkError
+      }
+
+      // 其他错误，包装后抛出
+      const roxyError = RoxyError.from(error, ErrorCode.LLM_API_ERROR, 'LLM chat request failed')
+      logError(roxyError, 'error', 'LiteLLMProvider')
+      throw roxyError
     }
   }
 }

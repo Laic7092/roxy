@@ -5,11 +5,14 @@ import type { OutboundMessage } from '../bus/types'
 import type { AgentLoop } from '../agent/loop'
 import type { Session } from '../session/manager'
 import { ContextMng } from '../agent/context'
+import { ResourceManager } from '../utils/resource-manager'
+import { RoxyError, ErrorCode } from '../types/errors'
+import { logError, log } from '../utils/error-handler'
 
 /**
  * WEB Channel - WebSocket 通道
  * 每个 WebSocket 连接对应一个 WebChannel 实例
- * 
+ *
  * 职责：
  * - 管理自己的 Session 和 Context
  * - 直接调用 AgentLoop.process() 处理消息
@@ -28,6 +31,9 @@ export class WebChannel extends BaseChannel {
 
   // AgentLoop 引用（由外部注入）
   private agentLoop: AgentLoop | null = null
+
+  // 资源管理器
+  private resourceManager = new ResourceManager()
 
   constructor(ws: WebSocket, bus: MessageBus, sessionId?: string) {
     super(bus)
@@ -57,20 +63,56 @@ export class WebChannel extends BaseChannel {
 
     this._running = true
 
-    // 发送连接成功消息
-    this.sendToClient({
-      type: 'connected',
-      channelId: this.id,
-      sessionId: this.sessionId,
-    })
+    try {
+      // 注册 WebSocket 关闭资源
+      this.resourceManager.register('websocket', async () => {
+        if (this.ws.readyState === WebSocket.OPEN) {
+          this.ws.close()
+        }
+      })
 
-    // 开始消费出站消息
-    this.consumeOutboundMessages()
+      // 注册消息队列清理
+      this.resourceManager.register('messageQueue', async () => {
+        this.messageQueue = []
+      })
+
+      // 发送连接成功消息
+      this.sendToClient({
+        type: 'connected',
+        channelId: this.id,
+        sessionId: this.sessionId,
+      })
+
+      // 开始消费出站消息
+      this.consumeOutboundMessages()
+    } catch (error) {
+      const roxyError = error instanceof RoxyError
+        ? error
+        : new RoxyError(
+            ErrorCode.CHANNEL_CONNECTION_FAILED,
+            'Failed to start Web channel',
+            error instanceof Error ? error : undefined
+          )
+      logError(roxyError, 'error', 'WebChannel')
+      throw roxyError
+    }
   }
 
   async stop(): Promise<void> {
     this._running = false
-    this.ws.close()
+    try {
+      await this.resourceManager.cleanupAll()
+    } catch (error) {
+      logError(
+        error instanceof RoxyError ? error : new RoxyError(
+          ErrorCode.RESOURCE_CLEANUP_FAILED,
+          'Failed to cleanup Web channel resources',
+          error instanceof Error ? error : undefined
+        ),
+        'warn',
+        'WebChannel'
+      )
+    }
   }
 
   async send(msg: OutboundMessage): Promise<void> {
@@ -100,7 +142,7 @@ export class WebChannel extends BaseChannel {
           this.sessionId = await this.createSession()
           // 重新初始化 Session 和 Context
           if (this.session) {
-            await this.session.save()
+            await this.sessionManager.save(this.session)
           }
           this.session = null
           this.ctx = null

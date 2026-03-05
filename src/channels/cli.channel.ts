@@ -7,10 +7,13 @@ import type { OutboundMessage } from '../bus/types'
 import type { AgentLoop } from '../agent/loop'
 import type { Session } from '../session/manager'
 import { ContextMng } from '../agent/context'
+import { ResourceManager } from '../utils/resource-manager'
+import { RoxyError, ErrorCode } from '../types/errors'
+import { logError, log } from '../utils/error-handler'
 
 /**
  * CLI Channel - 命令行交互式通道
- * 
+ *
  * 职责：
  * - 管理自己的 Session 和 Context
  * - 直接调用 AgentLoop.process() 处理消息
@@ -30,6 +33,9 @@ export class CLIChannel extends BaseChannel {
 
   // AgentLoop 引用（由外部注入）
   private agentLoop: AgentLoop | null = null
+
+  // 资源管理器
+  private resourceManager = new ResourceManager()
 
   constructor(bus: MessageBus, sessionId?: string) {
     super(bus)
@@ -60,44 +66,74 @@ export class CLIChannel extends BaseChannel {
     console.log(chalk.green(`💬 Entering interactive mode (session: ${this.sessionId || 'cli:default'})`))
     console.log(chalk.gray('Commands: /help, /clear, /history, /skills, /exit\n'))
 
-    // 创建 readline 接口
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    })
+    try {
+      // 创建 readline 接口
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      })
 
-    // 显示提示符
-    this.showPrompt()
+      // 注册资源
+      this.resourceManager.register('readline', async () => {
+        if (this.rl) {
+          this.rl.close()
+        }
+      })
 
-    // 处理用户输入
-    this.rl.on('line', async (input) => {
-      await this.handleLine(input)
-    })
+      this.resourceManager.register('spinner', async () => {
+        if (this.spinner?.isSpinning) {
+          this.spinner.stop()
+        }
+      })
 
-    // 处理关闭
-    this.rl.on('close', () => {
-      console.log(chalk.blue('\n👋 Session ended.'))
-      this._running = false
-    })
+      // 处理用户输入
+      this.rl.on('line', async (input) => {
+        await this.handleLine(input)
+      })
 
-    // 处理 Ctrl+C
-    process.on('SIGINT', () => {
-      console.log(chalk.blue('\n\n👋 Goodbye!'))
-      process.exit(0)
-    })
+      // 处理关闭
+      this.rl.on('close', () => {
+        console.log(chalk.blue('\n👋 Session ended.'))
+        this._running = false
+      })
 
-    // 开始消费出站消息
-    this.consumeOutboundMessages()
+      // 处理 Ctrl+C
+      process.on('SIGINT', () => {
+        console.log(chalk.blue('\n\n👋 Goodbye!'))
+        process.exit(0)
+      })
+
+      // 开始消费出站消息
+      this.consumeOutboundMessages()
+    } catch (error) {
+      const roxyError = error instanceof RoxyError
+        ? error
+        : new RoxyError(
+            ErrorCode.CHANNEL_CONNECTION_FAILED,
+            'Failed to start CLI channel',
+            error instanceof Error ? error : undefined
+          )
+      logError(roxyError, 'error', 'CLIChannel')
+      throw roxyError
+    }
   }
 
   async stop(): Promise<void> {
     this._running = false
-    if (this.rl) {
-      this.rl.close()
+    try {
+      await this.resourceManager.cleanupAll()
+    } catch (error) {
+      logError(
+        error instanceof RoxyError ? error : new RoxyError(
+          ErrorCode.RESOURCE_CLEANUP_FAILED,
+          'Failed to cleanup CLI channel resources',
+          error instanceof Error ? error : undefined
+        ),
+        'warn',
+        'CLIChannel'
+      )
+    } finally {
       this.rl = null
-    }
-    if (this.spinner) {
-      this.spinner.stop()
       this.spinner = null
     }
   }
