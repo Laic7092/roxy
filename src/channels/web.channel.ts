@@ -1,61 +1,47 @@
 import { WebSocket } from 'ws'
 import { BaseChannel } from './base'
-import type { MessageBus } from '../bus/instance'
-import type { OutboundMessage } from '../bus/types'
-import type { AgentLoop } from '../agent/loop'
+import type { EventBus } from '../bus/instance'
 import type { Session } from '../session/manager'
-import { ContextMng } from '../agent/context'
+import type { SessionManager } from '../session/manager'
 import { ResourceManager } from '../utils/resource-manager'
 import { RoxyError, ErrorCode } from '../types/errors'
-import { logError, log } from '../utils/error-handler'
+import { logError } from '../utils/error-handler'
 
 /**
  * WEB Channel - WebSocket 通道
  * 每个 WebSocket 连接对应一个 WebChannel 实例
  *
  * 职责：
- * - 管理自己的 Session 和 Context
- * - 直接调用 AgentLoop.process() 处理消息
- * - 通过 Bus 发布 outbound 消息，供其他 Channel 监听
+ * - 只负责 I/O
+ * - 发布用户消息事件
+ * - 监听并显示 Agent 响应
  */
 export class WebChannel extends BaseChannel {
   readonly id: string
 
   private ws: WebSocket
-  private messageQueue: OutboundMessage[] = []
+  private messageQueue: any[] = []
 
-  // 自己管理 Session 和 Context
+  // Session 管理
   private session: Session | null = null
-  private ctx: ContextMng | null = null
-  private sessionManager: any = null
-
-  // AgentLoop 引用（由外部注入）
-  private agentLoop: AgentLoop | null = null
+  private sessionManager: SessionManager | null = null
 
   // 资源管理器
   private resourceManager = new ResourceManager()
 
-  constructor(ws: WebSocket, bus: MessageBus, sessionId?: string) {
-    super(bus)
+  constructor(ws: WebSocket, eventBus: EventBus, sessionId?: string) {
+    super(eventBus)
     this.id = `web-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     this.ws = ws
     this.sessionId = sessionId || this.id
   }
 
   /**
-   * 设置 AgentLoop 实例（依赖注入）
+   * 初始化 Session
    */
-  setAgentLoop(agentLoop: AgentLoop): void {
-    this.agentLoop = agentLoop
-  }
-
-  /**
-   * 初始化 Session 和 Context
-   */
-  async initialize(workspace: string, sessionManager: any): Promise<void> {
+  async initialize(sessionManager: SessionManager): Promise<void> {
     this.sessionManager = sessionManager
     this.session = await sessionManager.getOrCreate(this.sessionId!)
-    this.ctx = new ContextMng(workspace, true)
   }
 
   async start(): Promise<void> {
@@ -76,15 +62,15 @@ export class WebChannel extends BaseChannel {
         this.messageQueue = []
       })
 
+      // 订阅事件
+      this.subscribeEvents()
+
       // 发送连接成功消息
       this.sendToClient({
         type: 'connected',
         channelId: this.id,
         sessionId: this.sessionId,
       })
-
-      // 开始消费出站消息
-      this.consumeOutboundMessages()
     } catch (error) {
       const roxyError = error instanceof RoxyError
         ? error
@@ -115,12 +101,62 @@ export class WebChannel extends BaseChannel {
     }
   }
 
-  async send(msg: OutboundMessage): Promise<void> {
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
-    } else {
-      this.messageQueue.push(msg)
-    }
+  /**
+   * 订阅事件
+   */
+  private subscribeEvents(): void {
+    // 监听 Agent 流式输出
+    this.eventBus.on('agent:stream', (event) => {
+      if (event.channelId === this.id) {
+        this.sendToClient({ type: 'stream', content: event.chunk })
+      }
+    })
+
+    // 监听 Agent 响应
+    this.eventBus.on('agent:response', (event) => {
+      if (event.channelId === this.id) {
+        this.sendToClient({ type: 'response', content: event.content })
+      }
+    })
+
+    // 监听工具调用
+    this.eventBus.on('agent:tool_call', (event) => {
+      if (event.channelId === this.id) {
+        this.sendToClient({
+          type: 'tool_call',
+          name: event.toolName,
+          args: event.toolArgs,
+        })
+      }
+    })
+
+    // 监听工具结果
+    this.eventBus.on('agent:tool_result', (event) => {
+      if (event.channelId === this.id) {
+        this.sendToClient({
+          type: 'tool_result',
+          name: event.toolName,
+          result: event.toolResult,
+        })
+      }
+    })
+
+    // 监听错误
+    this.eventBus.on('error', (event) => {
+      if (event.channelId === this.id) {
+        this.sendToClient({
+          type: 'error',
+          content: event.error instanceof Error ? event.error.message : String(event.error),
+        })
+      }
+    })
+  }
+
+  /**
+   * 显示消息
+   */
+  async display(msg: any): Promise<void> {
+    this.sendToClient(msg)
   }
 
   /**
@@ -132,20 +168,17 @@ export class WebChannel extends BaseChannel {
 
       switch (parsed.type) {
         case 'message':
-          // 发布到 Bus（用于通知其他 Channel）
-          await this.handleInput(parsed.content, this.sessionId || undefined)
-          // 直接调用 AgentLoop 处理
-          await this.processMessage(parsed.content)
+          // 发布用户消息事件
+          await this.handleInput(parsed.content)
           break
 
         case 'create_session':
           this.sessionId = await this.createSession()
-          // 重新初始化 Session 和 Context
-          if (this.session) {
-            await this.sessionManager.save(this.session)
-          }
+          // 重新初始化 Session
           this.session = null
-          this.ctx = null
+          if (this.sessionManager) {
+            this.session = await this.sessionManager.getOrCreate(this.sessionId)
+          }
           this.sendToClient({
             type: 'session_created',
             sessionId: this.sessionId,
@@ -154,9 +187,10 @@ export class WebChannel extends BaseChannel {
 
         case 'switch_session':
           await this.switchSession(parsed.sessionId)
-          // 重新初始化 Session 和 Context
-          this.session = null
-          this.ctx = null
+          // 重新加载 Session
+          if (this.sessionManager) {
+            this.session = await this.sessionManager.getOrCreate(parsed.sessionId)
+          }
           this.sendToClient({
             type: 'session_switched',
             sessionId: parsed.sessionId,
@@ -184,71 +218,13 @@ export class WebChannel extends BaseChannel {
   }
 
   /**
-   * 处理消息
-   */
-  private async processMessage(content: string): Promise<void> {
-    if (!this.agentLoop || !this.session || !this.ctx) {
-      await this.publish('error', 'Agent not initialized')
-      return
-    }
-
-    try {
-      // 发布 typing 状态
-      await this.publish('typing', 'Thinking...')
-
-      // 调用 AgentLoop 处理
-      await this.agentLoop.process(content, this.session, this.ctx, {
-        onStream: (chunk) => {
-          this.publish('stream', chunk)
-        },
-        onToolCall: (name, args) => {
-          this.publish('tool_call', { name, args })
-        },
-        onToolResult: (name, result) => {
-          this.publish('tool_result', { name, result })
-        },
-      })
-
-      // 保存 session 到磁盘
-      await this.sessionManager.save(this.session)
-    } catch (error) {
-      await this.publish('error', error instanceof Error ? error.message : 'Unknown error')
-    }
-  }
-
-  /**
-   * 发布消息到 Bus
-   */
-  private async publish(type: OutboundMessage['type'], content: any): Promise<void> {
-    await this.bus.publishOutbound({
-      channelId: this.id,
-      type,
-      content,
-    })
-  }
-
-  /**
-   * 消费出站消息队列（仅处理发给自己的消息）
-   */
-  private async consumeOutboundMessages(): Promise<void> {
-    while (this._running) {
-      try {
-        const msg = await this.bus.consumeOutbound()
-        if (msg.channelId === this.id) {
-          await this.send(msg)
-        }
-      } catch (error) {
-        console.error('Error consuming outbound message:', error)
-      }
-    }
-  }
-
-  /**
    * 发送消息到客户端
    */
   private sendToClient(data: any): void {
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
+    } else {
+      this.messageQueue.push(data)
     }
   }
 

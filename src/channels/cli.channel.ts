@@ -2,22 +2,20 @@ import readline from 'readline'
 import chalk from 'chalk'
 import ora, { type Ora } from 'ora'
 import { BaseChannel } from './base'
-import type { MessageBus } from '../bus/instance'
-import type { OutboundMessage } from '../bus/types'
-import type { AgentLoop } from '../agent/loop'
+import type { EventBus } from '../bus/instance'
 import type { Session } from '../session/manager'
-import { ContextMng } from '../agent/context'
+import type { SessionManager } from '../session/manager'
 import { ResourceManager } from '../utils/resource-manager'
 import { RoxyError, ErrorCode } from '../types/errors'
-import { logError, log } from '../utils/error-handler'
+import { logError } from '../utils/error-handler'
 
 /**
  * CLI Channel - 命令行交互式通道
  *
  * 职责：
- * - 管理自己的 Session 和 Context
- * - 直接调用 AgentLoop.process() 处理消息
- * - 通过 Bus 发布 outbound 消息，供其他 Channel 监听
+ * - 只负责 I/O
+ * - 发布用户消息事件
+ * - 监听并显示 Agent 响应
  */
 export class CLIChannel extends BaseChannel {
   readonly id = 'cli'
@@ -26,36 +24,24 @@ export class CLIChannel extends BaseChannel {
   private spinner: Ora | null = null
   private aiResponse = ''
 
-  // 自己管理 Session 和 Context
+  // Session 管理
   private session: Session | null = null
-  private ctx: ContextMng | null = null
-  private sessionManager: any = null
-
-  // AgentLoop 引用（由外部注入）
-  private agentLoop: AgentLoop | null = null
+  private sessionManager: SessionManager | null = null
 
   // 资源管理器
   private resourceManager = new ResourceManager()
 
-  constructor(bus: MessageBus, sessionId?: string) {
-    super(bus)
+  constructor(eventBus: EventBus, sessionId?: string) {
+    super(eventBus)
     this.sessionId = sessionId || 'cli:default'
   }
 
   /**
-   * 设置 AgentLoop 实例（依赖注入）
+   * 初始化 Session
    */
-  setAgentLoop(agentLoop: AgentLoop): void {
-    this.agentLoop = agentLoop
-  }
-
-  /**
-   * 初始化 Session 和 Context
-   */
-  async initialize(workspace: string, sessionManager: any): Promise<void> {
+  async initialize(sessionManager: SessionManager): Promise<void> {
     this.sessionManager = sessionManager
     this.session = await sessionManager.getOrCreate(this.sessionId!)
-    this.ctx = new ContextMng(workspace, true)
   }
 
   async start(): Promise<void> {
@@ -86,6 +72,9 @@ export class CLIChannel extends BaseChannel {
         }
       })
 
+      // 订阅事件
+      this.subscribeEvents()
+
       // 处理用户输入
       this.rl.on('line', async (input) => {
         await this.handleLine(input)
@@ -102,9 +91,6 @@ export class CLIChannel extends BaseChannel {
         console.log(chalk.blue('\n\n👋 Goodbye!'))
         process.exit(0)
       })
-
-      // 开始消费出站消息
-      this.consumeOutboundMessages()
     } catch (error) {
       const roxyError = error instanceof RoxyError
         ? error
@@ -138,43 +124,51 @@ export class CLIChannel extends BaseChannel {
     }
   }
 
-  async send(msg: OutboundMessage): Promise<void> {
-    switch (msg.type) {
-      case 'typing':
-        this.showTyping(msg.content)
-        break
-      case 'stream':
-        this.showStream(msg.content)
-        break
-      case 'response':
-        this.showResponse(msg.content)
-        break
-      case 'tool_call':
-        this.showToolCall(msg.content)
-        break
-      case 'tool_result':
-        this.showToolResult(msg.content)
-        break
-      case 'error':
-        this.showError(msg.content)
-        break
-    }
+  /**
+   * 订阅事件
+   */
+  private subscribeEvents(): void {
+    // 监听 Agent 流式输出
+    this.eventBus.on('agent:stream', (event) => {
+      if (event.channelId === this.id) {
+        this.showStream(event.chunk)
+      }
+    })
+
+    // 监听 Agent 响应
+    this.eventBus.on('agent:response', (event) => {
+      if (event.channelId === this.id) {
+        this.showResponse(event.content)
+      }
+    })
+
+    // 监听工具调用
+    this.eventBus.on('agent:tool_call', (event) => {
+      if (event.channelId === this.id) {
+        this.showToolCall({ name: event.toolName, args: event.toolArgs })
+      }
+    })
+
+    // 监听工具结果
+    this.eventBus.on('agent:tool_result', (event) => {
+      if (event.channelId === this.id) {
+        this.showToolResult({ name: event.toolName, result: event.toolResult })
+      }
+    })
+
+    // 监听错误
+    this.eventBus.on('error', (event) => {
+      if (event.channelId === this.id) {
+        this.showError(event.error instanceof Error ? event.error.message : String(event.error))
+      }
+    })
   }
 
   /**
-   * 消费出站消息队列（仅处理发给自己的消息）
+   * 显示消息
    */
-  private async consumeOutboundMessages(): Promise<void> {
-    while (this._running) {
-      try {
-        const msg = await this.bus.consumeOutbound()
-        if (msg.channelId === this.id) {
-          await this.send(msg)
-        }
-      } catch (error) {
-        console.error(chalk.red('Error consuming outbound message:'), error)
-      }
-    }
+  async display(msg: any): Promise<void> {
+    // 由事件订阅处理
   }
 
   /**
@@ -199,59 +193,10 @@ export class CLIChannel extends BaseChannel {
     // 显示用户输入
     console.log(`\n${chalk.green('[You]:')} ${trimmedInput}`)
 
-    // 发布到 Bus（用于通知其他 Channel）
-    await this.handleInput(trimmedInput, this.sessionId || undefined)
-
-    // 直接调用 AgentLoop 处理
-    await this.processMessage(trimmedInput)
+    // 发布用户消息事件
+    await this.handleInput(trimmedInput)
 
     this.showPrompt()
-  }
-
-  /**
-   * 处理消息
-   */
-  private async processMessage(content: string): Promise<void> {
-    if (!this.agentLoop || !this.session || !this.ctx) {
-      await this.publish('error', 'Agent not initialized')
-      return
-    }
-
-    try {
-      // 发布 typing 状态
-      await this.publish('typing', 'Thinking...')
-
-      // 调用 AgentLoop 处理
-      await this.agentLoop.process(content, this.session, this.ctx, {
-        onStream: (chunk) => {
-          this.publish('stream', chunk)
-        },
-        onToolCall: (name, args) => {
-          this.publish('tool_call', { name, args })
-        },
-        onToolResult: (name, result) => {
-          this.publish('tool_result', { name, result })
-        },
-      })
-
-      await this.publish('response', '')
-
-      // 保存 session 到磁盘
-      await this.sessionManager.save(this.session)
-    } catch (error) {
-      await this.publish('error', error instanceof Error ? error.message : 'Unknown error')
-    }
-  }
-
-  /**
-   * 发布消息到 Bus
-   */
-  private async publish(type: OutboundMessage['type'], content: any): Promise<void> {
-    await this.bus.publishOutbound({
-      channelId: this.id,
-      type,
-      content,
-    })
   }
 
   /**
@@ -267,6 +212,10 @@ export class CLIChannel extends BaseChannel {
       case '/clear':
         if (this.session) {
           this.session.clear()
+          // 保存清空后的 session
+          if (this.sessionManager) {
+            await this.sessionManager.save(this.session.id)
+          }
         }
         console.log(chalk.yellow('🗑️  Session history cleared'))
         break
@@ -281,9 +230,7 @@ export class CLIChannel extends BaseChannel {
         }
         break
       case '/skills':
-        if (this.ctx) {
-          await this.ctx.reloadSkills()
-        }
+        console.log(chalk.gray('Reloading skills...'))
         break
       case '/help':
         console.log(chalk.gray('\n📚 Available commands:'))

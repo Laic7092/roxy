@@ -1,80 +1,100 @@
-# Roxy 项目说明
+# Roxy Project Context
 
-## 项目概述
+## Project Overview
 
-Roxy 是一个 AI 助手，允许用户通过命令行和 Web 与 AI 模型进行交互。该项目采用 TypeScript 编写，采用分层架构设计，支持会话管理、流式响应等功能。
+**Roxy** is an AI assistant that supports both CLI and Web interaction modes. Built with TypeScript, it features an event-driven architecture with session management, streaming responses, and tool execution capabilities.
 
-## 架构设计
-
-### 分层架构（参考 nanobot）
+### Core Architecture (Event-Driven)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    MessageBus (单例)                         │
-│  ┌─────────────────┐    ┌─────────────────┐                │
-│  │  inbound Queue  │    │ outbound Queue  │                │
-│  │  (Channel→Agent)│    │  (Agent→Channel)│                │
-│  └─────────────────┘    └─────────────────┘                │
+│                      EventBus (Singleton)                     │
+│  事件类型：                                                    │
+│  - user:message      (Channel → Orchestrator)                │
+│  - agent:response    (Agent → Channel/Session)               │
+│  - agent:stream      (Agent → Channel)                       │
+│  - agent:tool_call   (Agent → Executor)                      │
+│  - agent:tool_result (Executor → Agent)                      │
+│  - session:save      (Auto-triggered)                        │
+│  - agent:delegate    (Parent → SubAgent)                     │
+│  - team:broadcast    (Team Lead → Members)                   │
 └─────────────────────────────────────────────────────────────┘
          ▲                    ▲                    ▲
          │                    │                    │
 ┌────────┴────────┐   ┌───────┴────────┐   ┌───────┴───────┐
-│  CLIChannel     │   │  WebChannel    │   │  AgentLoop    │
-│  (只负责 I/O)    │   │  (只负责 I/O)   │   │  (单例！共享)  │
+│  CLIChannel     │   │  WebChannel    │   │  Orchestrator │
+│  (I/O only)     │   │  (I/O only)    │   │  (Routing)    │
 └─────────────────┘   └────────────────┘   └───────────────┘
                                               │
-                                              ▼
-                                    ┌─────────────────┐
-                                    │ SessionManager  │
-                                    │ (按 sessionId   │
-                                    │  隔离会话)       │
-                                    └─────────────────┘
+                    ┌─────────────────────────┼─────────────────────────┐
+                    │                         │                         │
+           ┌────────┴────────┐       ┌────────┴────────┐       ┌────────┴────────┐
+           │  MainAgent      │       │  SubAgent #1    │       │  SubAgent #2    │
+           │  (General)      │       │  (Code Expert)  │       │  (Doc Expert)   │
+           └─────────────────┘       └─────────────────┘       └─────────────────┘
 ```
 
-### 核心设计原则
+### Design Principles
 
-1. **单一 AgentLoop 实例** - CLI 和 Web 共享同一个 AgentLoop
-2. **MessageBus 双队列** - inbound (Channel→Agent), outbound (Agent→Channel)
-3. **Channel 只负责 I/O** - 不创建 Agent，只通过 BUS 通信
-4. **Session 隔离** - 通过 sessionId 实现会话隔离（`cli:*`, `web:*`）
+1. **Event-Driven** - All components communicate via EventBus
+2. **Channel I/O Only** - Channels only handle input/output, no business logic
+3. **Session Auto-Save** - SessionManager listens to events and auto-persists
+4. **Agent Orchestration** - Orchestrator routes tasks to appropriate Agents
+5. **SubAgent Support** - Agents can delegate tasks to specialized SubAgents
+6. **Agent Teams** - Team Lead can broadcast tasks to multiple members
 
-### 各组件职责
+### Component Responsibilities
 
-| 组件 | 职责 |
-|------|------|
-| **Channel** | 负责输入输出，管理 Session 生命周期和持久化 |
-| **MessageBus** | 双队列事件总线，解耦 Channel 和 Agent |
-| **AgentLoop** | 单一实例，处理所有 Channel 的消息（无状态） |
-| **SessionManager** | 按 sessionId 管理会话，实现隔离和持久化 |
+| Component | Responsibility |
+|-----------|----------------|
+| **Channel** | I/O only, publishes user messages, displays agent responses |
+| **EventBus** | Event hub for all component communication |
+| **Orchestrator** | Routes user messages to agents, manages teams |
+| **AgentFactory** | Creates and manages Agent instances |
+| **AgentLoop** | Processes tasks, handles LLM calls and tool execution |
+| **SessionManager** | Session persistence, listens to events for auto-save |
 
-## 项目结构
+## Project Structure
 
 ```
 roxy/
 ├── src/
 │   ├── agent/
-│   │   ├── loop.ts         # AgentLoop - 消息处理核心（支持运行模式）
-│   │   └── context.ts      # 上下文管理
+│   │   ├── loop.ts         # AgentLoop - event-driven message processor
+│   │   ├── context.ts      # Context management
+│   │   ├── factory.ts      # AgentFactory - creates/manages agents
+│   │   ├── memory.ts       # Memory management
+│   │   ├── skill.ts        # Skill system
+│   │   └── types.ts        # Agent type definitions
 │   ├── bus/
-│   │   ├── instance.ts     # MessageBus - 双队列实现
-│   │   └── types.ts        # 消息类型定义
+│   │   ├── instance.ts     # EventBus - event hub implementation
+│   │   ├── events.ts       # Event type definitions
+│   │   └── types.ts        # Legacy types (deprecated)
 │   ├── channels/
-│   │   ├── base.ts         # Channel 抽象基类
-│   │   ├── cli.channel.ts  # CLI 通道实现
-│   │   └── web.channel.ts  # Web 通道实现
+│   │   ├── base.ts         # Channel abstract base class
+│   │   ├── cli.channel.ts  # CLI channel implementation
+│   │   └── web.channel.ts  # Web channel implementation
 │   ├── cli/
 │   │   └── commands/
-│   │       ├── agent.ts    # agent 命令
-│   │       ├── onboard.ts  # onboard 命令
-│   │       └── web.ts      # web 命令
-│   ├── config/             # 配置管理
-│   ├── provider/           # LLM 提供商抽象
-│   ├── session/            # 会话管理
-│   ├── tools/              # 工具系统
-│   ├── skills/             # 技能系统
+│   │       ├── agent.ts    # agent command
+│   │       ├── onboard.ts  # onboard command
+│   │       └── web.ts      # web command
+│   ├── config/
+│   │   └── manager.ts      # Configuration management
+│   ├── orchestrator/
+│   │   └── orchestrator.ts # AgentOrchestrator - task routing
+│   ├── provider/
+│   │   ├── base.ts         # LLM provider base class
+│   │   └── llm.ts          # LiteLLM provider implementation
+│   ├── session/
+│   │   └── manager.ts      # Session management and persistence
+│   ├── tools/              # Tool system
+│   ├── skills/             # Skill system
 │   ├── web/
-│   │   └── server.ts       # Web 服务器
-│   └── types/              # 类型定义
+│   │   └── server.ts       # Web server
+│   ├── types/
+│   │   └── errors.ts       # Error type definitions
+│   └── utils/              # Utility functions
 ├── tests/
 ├── package.json
 ├── tsconfig.json
@@ -82,298 +102,422 @@ roxy/
 └── README.md
 ```
 
-## 核心组件
+## Core Components
 
-### MessageBus (`src/bus/`)
+### EventBus (`src/bus/`)
 
-**双队列设计**：
+**Event-Driven Communication**:
 ```typescript
-class MessageBus {
-  private inbound: AsyncQueue<InboundMessage>   // Channel → Agent
-  private outbound: AsyncQueue<OutboundMessage> // Agent → Channel
-
-  publishInbound(msg): Promise<void>
-  consumeInbound(): Promise<InboundMessage>
-  publishOutbound(msg): Promise<void>
-  consumeOutbound(): Promise<OutboundMessage>
+class EventBus {
+  // Publish event
+  emit<K extends keyof EventMap>(event: K, data: EventMap[K]): void
+  
+  // Subscribe to event
+  on<K extends keyof EventMap>(event: K, handler: Handler<EventMap[K]>): void
+  
+  // Convenience methods
+  publishUserMessage(data: Omit<EventMap['user:message'], 'timestamp'>): void
+  publishAgentResponse(data: Omit<EventMap['agent:response'], 'timestamp'>): void
+  publishAgentStream(data: Omit<EventMap['agent:stream'], 'timestamp'>): void
+  publishAgentToolCall(data: Omit<EventMap['agent:tool_call'], 'timestamp'>): void
+  publishAgentTaskComplete(data: Omit<EventMap['agent:task:complete'], 'timestamp'>): void
 }
 ```
 
-**消息类型**：
+**Event Types** (`src/bus/events.ts`):
 ```typescript
-interface InboundMessage {
-  channelId: string
-  content: string
-  sessionId?: string      // 决定会话隔离
-  timestamp: Date
-}
-
-interface OutboundMessage {
-  channelId: string
-  type: 'typing' | 'stream' | 'response' | 'tool_call' | 'tool_result' | 'error'
-  content: string | any
+interface EventMap {
+  'user:message': UserMessageEvent
+  'agent:response': AgentResponseEvent
+  'agent:stream': AgentStreamEvent
+  'agent:tool_call': AgentToolCallEvent
+  'agent:tool_result': AgentToolResultEvent
+  'agent:execute': AgentExecuteEvent
+  'agent:task:complete': AgentTaskCompleteEvent
+  'agent:delegate': AgentDelegateEvent
+  'team:broadcast': TeamBroadcastEvent
+  'session:save': SessionSaveEvent
+  'error': ErrorEvent
 }
 ```
 
-### Channel 层 (`src/channels/`)
+### Channel Layer (`src/channels/`)
 
-**BaseChannel** - 抽象基类：
+**BaseChannel** - Simplified abstract base class:
 ```typescript
 abstract class BaseChannel {
   abstract readonly id: string
   protected sessionId: string | null
-  protected bus: MessageBus
+  protected eventBus: EventBus
 
   abstract start(): Promise<void>
   abstract stop(): Promise<void>
-  abstract send(msg: OutboundMessage): Promise<void>
+  abstract display(msg: any): Promise<void>
 
-  protected handleInput(content: string, sessionId?: string): Promise<void>
-  async createSession(): Promise<string>
-  async switchSession(sessionId: string): Promise<void>
-}
-```
-
-**Channel 的 Session 管理**：
-```typescript
-// Channel 持有 sessionManager 和 session 引用
-class CLIChannel extends BaseChannel {
-  private session: Session | null = null
-  private sessionManager: SessionManager | null = null
-
-  async initialize(workspace: string, sessionManager: SessionManager) {
-    this.sessionManager = sessionManager
-    this.session = await sessionManager.getOrCreate(this.sessionId!)
-  }
-
-  private async processMessage(content: string) {
-    await this.agentLoop.process(content, this.session, this.ctx, callbacks)
-    // 处理完成后自动保存
-    await this.sessionManager.save(this.session)
+  protected async handleInput(content: string): Promise<void> {
+    this.eventBus.publishUserMessage({
+      channelId: this.id,
+      sessionId: this.sessionId!,
+      content,
+    })
   }
 }
 ```
 
-**CLIChannel** - CLI 通道实现：
-- 使用 `readline` 处理用户输入
-- 使用 `chalk` 和 `ora` 美化输出
-- 支持命令：`/help`, `/clear`, `/history`, `/skills`, `/exit`
-- 默认 sessionId: `cli:default`
-- **自动保存 Session** - 每次消息处理后自动持久化到磁盘
+**CLIChannel** - CLI channel implementation:
+- Uses `readline` for user input
+- Uses `chalk` and `ora` for styled output
+- Subscribes to events for display
+- Supports commands: `/help`, `/clear`, `/history`, `/skills`, `/exit`
+- Default sessionId: `cli:default`
 
-**WebChannel** - Web 通道实现：
-- 使用 WebSocket 进行通信
-- 每个连接一个 Channel 实例
-- 支持会话管理：创建、切换会话
-- 默认 sessionId: `web:{随机 ID}`
-- **自动保存 Session** - 每次消息处理后自动持久化到磁盘
+**WebChannel** - Web channel implementation:
+- Uses WebSocket for communication
+- One Channel instance per connection
+- Subscribes to events for display
+- Default sessionId: `web:{random ID}`
 
-### AgentLoop (`src/agent/`)
+### AgentLoop (`src/agent/loop.ts`)
 
-**两种使用模式**：
-
-1. **直接调用模式** - 用于测试或简单场景
+**Event-Driven Message Processor**:
 ```typescript
-const agentLoop = new AgentLoop({ session, ctx, provider, ... })
-await agentLoop.msgHandler('Hello', onStreamData, onToolCall, onToolResult)
-```
+class AgentLoop {
+  constructor(deps: AgentLoopDeps) {
+    // Subscribe to agent:execute events
+    this.setupEventHandlers()
+  }
 
-2. **运行模式** - 从 BUS 消费消息，自动处理
-```typescript
-await agentLoop.run({
-  sessionManager,
-  defaultSessionPrefix: 'cli', // 或 'web'
-})
-```
-
-**运行模式工作流程**：
-```typescript
-async run(options: RunOptions) {
-  while (this._running) {
-    const msg = await this.bus.consumeInbound()
-    await this.handleMessage(msg)
+  private async executeTask(task: AgentTask): Promise<void> {
+    // 1. Get session
+    this.session = await this.getOrCreateSession(task.sessionId)
+    
+    // 2. Add user message
+    this.session.addMessage('user', task.content)
+    
+    // 3. Call LLM API
+    const result = await this.provider.chat({ ... })
+    
+    // 4. Handle tool calls
+    if (toolCalls) {
+      this.eventBus.publishAgentToolCall({ ... })
+      const results = await this.toolExecutor.executeTools(toolCalls)
+      this.eventBus.publishAgentToolResult({ ... })
+    }
+    
+    // 5. Publish response
+    this.eventBus.publishAgentResponse({ ... })
   }
 }
-
-async handleMessage(msg: InboundMessage) {
-  // 1. 确定 sessionId（决定会话隔离）
-  const sessionId = msg.sessionId || `${this.defaultSessionPrefix}:${msg.channelId}`
-
-  // 2. 获取或创建 Session（按 sessionId 隔离）
-  const session = await this.sessionManager.getOrCreate(sessionId)
-
-  // 3. 处理消息并发布响应到 BUS
-  await this.msgHandler(msg.content, 
-    (chunk) => this.publishStream(msg.channelId, chunk),
-    (name, args) => this.publishToolCall(msg.channelId, name, args),
-    (name, result) => this.publishToolResult(msg.channelId, name, result)
-  )
-}
 ```
 
-### 会话管理 (`src/session/`)
+### AgentFactory (`src/agent/factory.ts`)
 
-**Session 隔离策略**：
-```
-CLI 默认：sessionId = 'cli:default'     → cli_default.jsonl
-CLI 工作：sessionId = 'cli:work'        → cli_work.jsonl
-Web 用户 A: sessionId = 'web:userA'      → web_userA.jsonl
-Web 用户 B: sessionId = 'web:userB'      → web_userB.jsonl
-共享会话：sessionId = 'shared:proj1'    → shared_proj1.jsonl (CLI 和 Web 共享)
-```
-
-**存储格式**（JSONL）：
-```jsonl
-{"_type":"metadata","key":"cli:default","created_at":"..."}
-{"role":"user","content":"Hello","timestamp":"..."}
-{"role":"assistant","content":"Hi!","timestamp":"..."}
-```
-
-**Session 持久化**：
-- Channel 在每次消息处理完成后自动调用 `sessionManager.save(session)`
-- 数据以 JSONL 格式保存到 `~/.roxy/sessions/` 目录
-- 文件名由 sessionId 编码生成（特殊字符转为下划线）
-
-## 关键功能实现
-
-### 消息流转
-
-```
-1. 用户输入
-   → CLIChannel.handleInput()
-   → bus.publishInbound({ sessionId: 'cli:default', ... })
-
-2. MessageBus.inbound 队列
-
-3. AgentLoop.consumeInbound()
-   → 按 sessionId 获取 Session
-   → AgentLoop.msgHandler()
-   → bus.publishOutbound({ type: 'stream', ... })
-   → bus.publishOutbound({ type: 'response', ... })
-
-4. MessageBus.outbound 队列
-
-5. CLIChannel.consumeOutbound()
-   → CLIChannel.send()
-   → console.log() / chalk.blue()
-
-6. Session 持久化
-   → Channel 调用 sessionManager.save(session)
-   → 数据写入 ~/.roxy/sessions/{sessionId}.jsonl
-```
-
-### 流式响应
-
+**Agent Creation and Management**:
 ```typescript
-// AgentLoop 处理
-const handleStreamData = (chunk: string) => {
-  this.bus.publishOutbound({
-    channelId: msg.channelId,
-    type: 'stream',
-    content: chunk,
-  })
+class AgentFactory {
+  async createAgent(config: AgentConfig): Promise<AgentLoop> {
+    const agent = new AgentLoop({ ... })
+    
+    // Subscribe to execution events for this agent
+    this.eventBus.on('agent:execute', async (event) => {
+      if (event.task.agentId === config.id) {
+        await this.handleTaskExecution(agent, event.task)
+      }
+    })
+    
+    this.agents.set(config.id, agent)
+    return agent
+  }
+
+  async createSubAgent(parentId: string, specialty: string): Promise<AgentLoop> {
+    const subAgentId = `sub-${specialty}-${uuidv4().slice(0, 8)}`
+    return this.createAgent({ id: subAgentId, role: AgentRole.SUB })
+  }
 }
-
-// Channel 接收并显示
-case 'stream':
-  process.stdout.write(chalk.blue(chunk))
-  break
 ```
 
-### 工具调用
+### AgentOrchestrator (`src/orchestrator/orchestrator.ts`)
 
+**Task Routing and Team Management**:
+```typescript
+class AgentOrchestrator {
+  private async handleUserMessage(event: UserMessageEvent) {
+    // Route to appropriate agent
+    const agentId = await this.selectAgent(event.content)
+    
+    // Create task
+    const task: AgentTask = {
+      id: uuidv4(),
+      agentId,
+      content: event.content,
+      sessionId: event.sessionId,
+      channelId: event.channelId,
+      status: TaskStatus.PENDING,
+    }
+    
+    // Publish execution event
+    this.eventBus.publishAgentExecute({ task })
+  }
+
+  async createTeam(team: AgentTeam): Promise<void> {
+    // Create team members
+    for (const member of team.members) {
+      await this.agentFactory.createAgent({
+        id: member.agentId,
+        role: AgentRole.SUB,
+      })
+    }
+    this.teams.set(team.id, team)
+  }
+}
 ```
-1. LLM 返回工具调用请求
-2. AgentLoop 发布 tool_call 消息
-3. AgentLoop 执行工具
-4. AgentLoop 发布 tool_result 消息
-5. 循环处理直到没有工具调用
+
+### SessionManager (`src/session/manager.ts`)
+
+**Event-Driven Auto-Save**:
+```typescript
+class SessionManager {
+  setEventBus(eventBus: EventBus): void {
+    this.eventBus = eventBus
+    this.setupEventHandlers()
+  }
+
+  private setupEventHandlers(): void {
+    // Auto-save on user message
+    this.eventBus.on('user:message', (event) => {
+      this.appendMessage(event.sessionId, 'user', event.content)
+    })
+
+    // Auto-save on agent response
+    this.eventBus.on('agent:response', (event) => {
+      this.appendMessage(event.sessionId, 'assistant', event.content)
+      this.save(event.sessionId) // Auto-persist
+    })
+
+    // Auto-save on tool result
+    this.eventBus.on('agent:tool_result', (event) => {
+      this.appendToolMessage(event.sessionId, event.toolResult, event.toolCallId)
+      this.save(event.sessionId) // Auto-persist
+    })
+  }
+}
 ```
 
-## 构建和运行
+**Session Isolation Strategy**:
+```
+CLI Default: sessionId = 'cli:default'     → cli_default.jsonl
+CLI Work:    sessionId = 'cli:work'        → cli_work.jsonl
+Web User A:  sessionId = 'web:userA'       → web_userA.jsonl
+Web User B:  sessionId = 'web:userB'       → web_userB.jsonl
+Shared:      sessionId = 'shared:proj1'    → shared_proj1.jsonl (CLI & Web shared)
+```
 
-### 构建项目
+## Building and Running
+
+### Install Dependencies
+```bash
+pnpm install
+```
+
+### Build Project
 ```bash
 pnpm build
 ```
 
-### 运行测试
+### Run Tests
 ```bash
 pnpm test
 ```
 
-### 开发模式
+### Development Mode
 ```bash
 pnpm dev
 ```
 
-### 安装和使用
+### Lint and Format
 ```bash
-# 全局安装
+pnpm lint      # Run oxlint
+pnpm lint:fix  # Fix lint issues
+pnpm fmt       # Format with oxfmt
+```
+
+### Global Install and Usage
+```bash
+# Install globally
 pnpm add -g roxy
 
-# 初始化配置
+# Initialize configuration
 roxy onboard
 
-# 启动 CLI 会话
+# Start CLI session
 roxy agent
-roxy agent --session cli:work  # 指定会话
+roxy agent --session cli:work  # Specify session
 
-# 启动 Web 服务器
+# Start Web server
 roxy web -p 3000
 ```
 
-## 开发约定
+## Configuration
 
-### 类型安全
-- 项目使用 TypeScript，所有核心接口都有类型定义
-- 消息类型在 `src/bus/types.ts` 中统一定义
+Configuration file location: `~/.roxy/config.json`
 
-### 架构模式
-- **Channel 模式**：统一输入输出接口，便于扩展新通道
-- **单一 AgentLoop**：所有 Channel 共享，节省资源
-- **双队列总线**：清晰的消息流向，便于调试和扩展
-- **Session 隔离**：通过 sessionId 实现多会话管理
+```json
+{
+  "workspace": "/home/user/.roxy/workspace",
+  "agents": {
+    "defaults": {
+      "model": "ollama/qwen3.5:9b"
+    }
+  },
+  "providers": {
+    "ollama": {
+      "apiKey": "ollama-local",
+      "baseURL": "http://localhost:11434/v1"
+    },
+    "deepseek": {
+      "apiKey": "your-api-key-here",
+      "baseURL": "https://api.deepseek.com"
+    }
+  }
+}
+```
 
-### 代码风格
-- 使用 ES2020+ 特性
-- 遵循现代 TypeScript 最佳实践
-- 模块化设计便于扩展和维护
+## Development Conventions
 
-## 扩展性
+### Type Safety
+- TypeScript throughout the codebase
+- All events have type definitions in `src/bus/events.ts`
+- Agent types in `src/agent/types.ts`
 
-### 新增 Channel
+### Error Handling
+- Unified `RoxyError` class with error codes
+- Error categorization: Network, Config, Session, Tool, LLM, System
+- Recoverable vs Fatal error distinction
+- Centralized logging via `src/utils/error-handler.ts`
 
-1. 继承 `BaseChannel` 类
-2. 实现 `start()`, `stop()`, `send()` 方法
-3. 在 CLI 或 Web 入口中启动
+### Code Style
+- ES2020+ features
+- Modern TypeScript best practices
+- Modular design for extensibility
+
+### Testing Practices
+- Vitest for unit testing
+- Tests located in `tests/` directory
+- Test files named `*.test.ts`
+
+## Extensibility
+
+### Adding a New Channel
+
+1. Extend `BaseChannel` class
+2. Implement `start()`, `stop()`, `display()` methods
+3. Subscribe to events in `start()`
 
 ```typescript
 class DiscordChannel extends BaseChannel {
   readonly id = 'discord'
   
-  async start() { /* ... */ }
-  async stop() { /* ... */ }
-  async send(msg: OutboundMessage) { /* ... */ }
+  async start() {
+    this.subscribeEvents()
+    // Setup Discord bot...
+  }
+  
+  async display(msg: any) {
+    // Send to Discord...
+  }
 }
 ```
 
-### 新增消息类型
+### Adding New Event Types
 
-1. 在 `src/bus/types.ts` 中添加类型定义
-2. 在 `AgentLoop.handleMessage()` 中处理新类型
-3. 在 Channel 的 `send()` 中实现对应的输出方法
+1. Add type definition in `src/bus/events.ts`
+2. Add to `EventMap` interface
+3. Add convenience method in `EventBus`
 
-### 新增工具
+### Adding New Agent Types
 
-在 `src/tools/` 目录下创建新工具，实现 `Tool` 接口，工具会自动被 `ToolExecutor` 发现和加载。
+1. Create agent config with unique `id` and `role`
+2. Use `AgentFactory.createAgent(config)`
+3. Agent automatically subscribes to `agent:execute` events
 
-### Session 管理策略
+### Adding SubAgent Support
 
-| 场景 | SessionId 格式 | 说明 |
-|------|---------------|------|
-| CLI 默认 | `cli:default` | CLI 独立会话 |
-| CLI 多会话 | `cli:{name}` | CLI 多个独立会话 |
-| Web 默认 | `web:{随机 ID}` | 每个 Web 连接独立会话 |
-| Web 用户会话 | `web:{userId}` | 按用户隔离会话 |
-| 跨通道共享 | `shared:{name}` | CLI 和 Web 共享同一会话 |
+```typescript
+// In your agent's logic
+this.eventBus.publishAgentDelegate({
+  parentId: task.id,
+  parentAgentId: this.config.id,
+  delegation: {
+    parentId: task.id,
+    subTask: 'Review this code',
+    agentType: 'code-reviewer',
+  },
+})
+```
+
+### Creating Agent Teams
+
+```typescript
+const codeReviewTeam: AgentTeam = {
+  id: 'code-review-team',
+  name: 'Code Review Team',
+  lead: 'senior-dev',
+  members: [
+    { agentId: 'security-expert', role: 'security_review' },
+    { agentId: 'performance-expert', role: 'perf_review' },
+    { agentId: 'style-expert', role: 'style_review' },
+  ],
+}
+
+await orchestrator.createTeam(codeReviewTeam)
+```
+
+## Key Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `commander` | CLI command framework |
+| `chalk` | Terminal styling |
+| `ora` | Loading spinners |
+| `ws` | WebSocket server |
+| `mitt` | Event emitter (EventBus foundation) |
+| `uuid` | Unique ID generation |
+
+## Dev Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `tsdown` | Build tool |
+| `typescript` | Type checking |
+| `vitest` | Testing framework |
+| `oxlint` | Linting |
+| `oxfmt` | Formatting |
+
+## Event Flow Example
+
+```
+1. User types "Hello" in CLI
+   → CLIChannel.handleInput()
+   → eventBus.publishUserMessage({ sessionId: 'cli:default', content: 'Hello' })
+
+2. AgentOrchestrator receives event
+   → selectAgent() → 'main-agent'
+   → Create task
+   → eventBus.publishAgentExecute({ task })
+
+3. AgentLoop (main-agent) receives event
+   → executeTask(task)
+   → Get session from SessionManager
+   → Call LLM API
+   → eventBus.publishAgentStream({ chunk: 'H' })
+   → eventBus.publishAgentStream({ chunk: 'i' })
+   → eventBus.publishAgentResponse({ content: 'Hi!' })
+
+4. SessionManager receives events
+   → On 'user:message': append user message
+   → On 'agent:response': append assistant message + save()
+
+5. CLIChannel receives events
+   → On 'agent:stream': showStream(chunk)
+   → On 'agent:response': showResponse(content)
+```

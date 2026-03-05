@@ -1,10 +1,14 @@
-import type { MessageBus } from '../bus/instance'
-import type { InboundMessage, OutboundMessage } from '../bus/types'
+import type { EventBus } from '../bus/instance'
 
 /**
  * Channel 抽象基类
  *
  * 所有通道（CLI、WEB 等）都应继承此类，实现具体的输入输出逻辑
+ *
+ * 职责：
+ * - 只负责 I/O
+ * - 发布用户消息事件
+ * - 监听并显示 Agent 响应
  */
 export abstract class BaseChannel {
   /**
@@ -23,12 +27,12 @@ export abstract class BaseChannel {
   protected sessionId: string | null = null
 
   /**
-   * MessageBus 实例
+   * EventBus 实例
    */
-  protected bus: MessageBus
+  protected eventBus: EventBus
 
-  constructor(bus: MessageBus) {
-    this.bus = bus
+  constructor(eventBus: EventBus) {
+    this.eventBus = eventBus
   }
 
   /**
@@ -42,19 +46,18 @@ export abstract class BaseChannel {
   abstract stop(): Promise<void>
 
   /**
-   * 发送消息到通道
+   * 显示消息到通道
    */
-  abstract send(msg: OutboundMessage): Promise<void>
+  abstract display(msg: any): Promise<void>
 
   /**
-   * 处理用户输入 - 发布到 BUS
+   * 处理用户输入 - 发布事件
    */
-  protected async handleInput(content: string, sessionId?: string): Promise<void> {
-    await this.bus.publishInbound({
+  protected async handleInput(content: string): Promise<void> {
+    this.eventBus.publishUserMessage({
       channelId: this.id,
+      sessionId: this.sessionId!,
       content,
-      sessionId,
-      timestamp: new Date(),
     })
   }
 

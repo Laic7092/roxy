@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, unlink, copyFile } from 'fs/promises'
 import { join } from 'path'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log } from '../utils/error-handler'
+import type { EventBus } from '../bus/instance'
 
 export interface Message {
   role: Role
@@ -19,12 +20,10 @@ export interface ToolMessage {
 export type SessionMessage = Message | ToolMessage
 
 export class Session {
-  key: string
   messages: SessionMessage[] = []
   updatedAt: Date
 
   constructor(public id: string) {
-    this.key = id
     this.updatedAt = new Date()
   }
 
@@ -77,19 +76,87 @@ export class Session {
   }
 }
 
+/**
+ * SessionManager - 会话管理
+ *
+ * 职责：
+ * - 加载/保存会话到磁盘
+ * - 监听事件自动保存会话
+ */
 export class SessionManager {
   private dir: string
+  private eventBus: EventBus | null = null
+
+  // 内存缓存
+  private sessions: Map<string, Session> = new Map()
 
   constructor(sessionDir?: string) {
     this.dir = sessionDir || join(require('os').homedir(), '.roxy', 'sessions')
+  }
+
+  /**
+   * 设置 EventBus 并订阅事件
+   */
+  setEventBus(eventBus: EventBus): void {
+    this.eventBus = eventBus
+    this.setupEventHandlers()
+  }
+
+  /**
+   * 设置事件处理器
+   */
+  private setupEventHandlers(): void {
+    if (!this.eventBus) return
+
+    // 监听用户消息
+    this.eventBus.on('user:message', (event) => {
+      this.appendMessage(event.sessionId, 'user', event.content)
+    })
+
+    // 监听 Agent 响应
+    this.eventBus.on('agent:response', (event) => {
+      this.appendMessage(event.sessionId, 'assistant', event.content)
+      this.save(event.sessionId) // 自动保存
+    })
+
+    // 监听工具结果
+    this.eventBus.on('agent:tool_result', (event) => {
+      this.appendToolMessage(event.sessionId, event.toolResult, event.toolCallId)
+      this.save(event.sessionId) // 自动保存
+    })
+  }
+
+  /**
+   * 添加消息到会话
+   */
+  appendMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session) {
+      session.addMessage(role, content)
+    }
+  }
+
+  /**
+   * 添加工具消息到会话
+   */
+  appendToolMessage(sessionId: string, content: string, toolCallId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session) {
+      session.addMessage('tool', content, toolCallId)
+    }
   }
 
   private async ensureDir() {
     await mkdir(this.dir, { recursive: true })
   }
 
-  private encodeKey(key: string) {
-    return key.replace(/[^a-z0-9]/gi, '_') + '.jsonl'
+  /**
+   * 将 sessionId 编码为安全的文件名
+   * 只替换路径分隔符和特殊字符
+   */
+  private encodeKey(sessionId: string): string {
+    // 简单替换：将 : 和 / 替换为 -
+    return sessionId.replace(/[/:]/g, '-') + '.jsonl'
   }
 
   /**
@@ -129,7 +196,16 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 获取或创建会话
+   */
   async getOrCreate(key: string): Promise<Session> {
+    // 先检查缓存
+    const cached = this.sessions.get(key)
+    if (cached) {
+      return cached
+    }
+
     const file = join(this.dir, this.encodeKey(key))
     try {
       const content = await readFile(file, 'utf-8')
@@ -189,15 +265,21 @@ export class SessionManager {
         log('warn', `Found ${corruptedLines} corrupted message(s) in session ${key}`, 'SessionManager')
         await this.backupCorruptedFile(file, key)
         // 保存修复后的数据
-        await this.save(session)
+        await this.save(key)
       }
+
+      // 缓存
+      this.sessions.set(key, session)
 
       return session
 
     } catch (error) {
       // 文件不存在
       if ((error as any).code === 'ENOENT') {
-        return new Session(key)
+        const session = new Session(key)
+        // 缓存
+        this.sessions.set(key, session)
+        return session
       }
 
       // 其他错误，记录并返回新会话
@@ -208,21 +290,33 @@ export class SessionManager {
       )
       logError(roxyError, 'warn', 'SessionManager')
 
-      return new Session(key)
+      const session = new Session(key)
+      // 缓存
+      this.sessions.set(key, session)
+      return session
     }
   }
 
-  async save(session: Session): Promise<void> {
+  /**
+   * 保存会话到磁盘
+   */
+  async save(sessionId: string): Promise<void> {
     try {
+      const session = this.sessions.get(sessionId)
+      if (!session) {
+        log('warn', `Session ${sessionId} not found in cache, skipping save`, 'SessionManager')
+        return
+      }
+
       await this.ensureDir()
-      const file = join(this.dir, this.encodeKey(session.key))
+      const file = join(this.dir, this.encodeKey(sessionId))
       const lines = session.messages.map((m) => JSON.stringify(m))
       await writeFile(file, lines.join('\n'), 'utf-8')
-      log('debug', `Session ${session.key} saved successfully`, 'SessionManager')
+      log('debug', `Session ${sessionId} saved successfully`, 'SessionManager')
     } catch (error) {
       const roxyError = new RoxyError(
         ErrorCode.SYSTEM_ERROR,
-        `Failed to save session ${session.key}`,
+        `Failed to save session ${sessionId}`,
         error instanceof Error ? error : undefined
       )
       logError(roxyError, 'error', 'SessionManager')
@@ -230,9 +324,14 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 删除会话
+   */
   async delete(key: string): Promise<boolean> {
     try {
       await unlink(join(this.dir, this.encodeKey(key)))
+      // 清除缓存
+      this.sessions.delete(key)
       log('debug', `Session ${key} deleted successfully`, 'SessionManager')
       return true
     } catch (error) {
@@ -244,5 +343,19 @@ export class SessionManager {
       logError(roxyError, 'warn', 'SessionManager')
       return false
     }
+  }
+
+  /**
+   * 获取会话
+   */
+  getSession(key: string): Session | undefined {
+    return this.sessions.get(key)
+  }
+
+  /**
+   * 清除缓存
+   */
+  clearCache(): void {
+    this.sessions.clear()
   }
 }

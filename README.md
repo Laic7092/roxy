@@ -2,6 +2,14 @@
 
 Roxy 是一个 AI 助手，支持 CLI 和 Web 多种交互方式。
 
+## 特性
+
+- 🤖 **多模态交互** - CLI 和 Web 两种交互方式
+- 💾 **会话持久化** - 自动保存对话历史到本地
+- 🔧 **工具系统** - 支持扩展工具调用
+- 🎨 **流式响应** - 实时显示 AI 回复
+- 📦 **模块化架构** - 基于消息总线的分层设计
+
 ## 安装
 
 ```bash
@@ -31,6 +39,7 @@ roxy onboard
   - `MEMORY.md` - 记忆存储
   - `SOUL.md` - 核心身份和价值观
   - `AGENT.md` - 代理配置
+  - `HISTORY.md` - 历史日志
 
 您需要编辑 `~/.roxy/config.json` 文件并添加您的 API 密钥。
 
@@ -53,6 +62,13 @@ roxy agent --session my-session
 ```bash
 roxy agent --clear
 ```
+
+**CLI 命令**：
+- `/help` - 显示帮助信息
+- `/clear` - 清除会话历史
+- `/history` - 显示会话历史
+- `/skills` - 重新加载技能
+- `/exit` - 退出会话
 
 **会话持久化**：
 - 所有会话会自动保存到 `~/.roxy/sessions/` 目录
@@ -146,27 +162,35 @@ Roxy 采用分层架构设计：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Channel Layer                           │
-│  ┌──────────────┐          ┌──────────────┐                 │
-│  │  CLIChannel  │          │  WebChannel  │                 │
-│  └──────┬───────┘          └──────┬───────┘                 │
-│         └────────────┬────────────┘                          │
-│                      ▼                                       │
-│         ┌─────────────────────────┐                          │
-│         │       MessageBus        │                          │
-│         │  (双队列：inbound/outbound)                        │
-│         └────────────┬────────────┘                          │
-│                      ▼                                       │
-│         ┌─────────────────────────┐                          │
-│         │      AgentGateway       │                          │
-│         └─────────────────────────┘                          │
+│                    MessageBus (单例)                         │
+│  ┌─────────────────┐    ┌─────────────────┐                │
+│  │  inbound Queue  │    │ outbound Queue  │                │
+│  │  (Channel→Agent)│    │  (Agent→Channel)│                │
+│  └─────────────────┘    └─────────────────┘                │
 └─────────────────────────────────────────────────────────────┘
+         ▲                    ▲                    ▲
+         │                    │                    │
+┌────────┴────────┐   ┌───────┴────────┐   ┌───────┴───────┐
+│  CLIChannel     │   │  WebChannel    │   │  AgentLoop    │
+│  (只负责 I/O)    │   │  (只负责 I/O)   │   │  (单例)        │
+└─────────────────┘   └────────────────┘   └───────────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────┐
+                                    │ SessionManager  │
+                                    │ (按 sessionId   │
+                                    │  隔离会话)       │
+                                    └─────────────────┘
 ```
 
-- **Channel 层**：CLI 和 Web 通道，统一输入输出接口，**管理 Session 持久化**
-- **MessageBus**：双队列事件总线，解耦通道和核心逻辑
-- **AgentGateway**：统一处理所有通道的消息
-- **SessionManager**：按 sessionId 隔离会话，自动持久化到磁盘
+### 核心组件
+
+| 组件 | 职责 |
+|------|------|
+| **Channel** | 负责输入输出，管理 Session 生命周期和持久化 |
+| **MessageBus** | 双队列事件总线，解耦 Channel 和 Agent |
+| **AgentLoop** | 单一实例，处理所有 Channel 的消息（无状态） |
+| **SessionManager** | 按 sessionId 管理会话，实现隔离和持久化 |
 
 ### 会话管理
 
@@ -175,14 +199,47 @@ Roxy 采用分层架构设计：
 - 存储格式：JSONL（每行一条 JSON 消息）
 - 自动保存：每次消息处理完成后自动持久化
 
+### 会话隔离策略
+
+| 场景 | SessionId 格式 | 说明 |
+|------|---------------|------|
+| CLI 默认 | `cli:default` | CLI 独立会话 |
+| CLI 多会话 | `cli:{name}` | CLI 多个独立会话 |
+| Web 默认 | `web:{随机 ID}` | 每个 Web 连接独立会话 |
+| Web 用户会话 | `web:{userId}` | 按用户隔离会话 |
+| 跨通道共享 | `shared:{name}` | CLI 和 Web 共享同一会话 |
+
 ## 开发
 
 如果您想为 Roxy 贡献代码：
 
-1. 克隆仓库
-2. 运行 `pnpm install`
-3. 运行 `pnpm build` 构建项目
-4. 运行 `pnpm test` 执行测试
+```bash
+# 1. 克隆仓库
+git clone <repository-url>
+
+# 2. 安装依赖
+pnpm install
+
+# 3. 构建项目
+pnpm build
+
+# 4. 运行测试
+pnpm test
+
+# 5. 开发模式
+pnpm dev
+```
+
+### 开发命令
+
+```bash
+pnpm lint      # 运行代码检查
+pnpm lint:fix  # 自动修复问题
+pnpm fmt       # 格式化代码
+pnpm build     # 构建项目
+pnpm test      # 运行测试
+pnpm dev       # 开发模式
+```
 
 ## 许可证
 
