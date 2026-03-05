@@ -44,6 +44,7 @@ export interface AgentStreamEvent {
 export interface AgentToolCallEvent {
   agentId: string
   taskId: string
+  channelId: string
   sessionId: string
   toolName: string
   toolArgs: any
@@ -57,6 +58,7 @@ export interface AgentToolCallEvent {
 export interface AgentToolResultEvent {
   agentId: string
   taskId: string
+  channelId: string
   sessionId: string
   toolName: string
   toolResult: any

@@ -137,6 +137,7 @@ export class AgentLoop {
                 this.eventBus.publishAgentToolCall({
                   agentId: this.config.id,
                   taskId: task.id,
+                  channelId: task.channelId,
                   sessionId: task.sessionId,
                   toolName: toolCall.function.name,
                   toolArgs: args,
@@ -167,6 +168,7 @@ export class AgentLoop {
               this.eventBus.publishAgentToolResult({
                 agentId: this.config.id,
                 taskId: task.id,
+                channelId: task.channelId,
                 sessionId: task.sessionId,
                 toolName: toolResult.name,
                 toolResult: toolResult.result,

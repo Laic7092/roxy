@@ -85,8 +85,6 @@ export class AgentOrchestrator {
 
       // 发布任务执行事件
       this.deps.eventBus.publishAgentExecute({ task })
-
-      log('info', `Task ${task.id} created for Agent ${agentId}`, 'Orchestrator')
     } catch (error) {
       logError(
         error instanceof RoxyError
