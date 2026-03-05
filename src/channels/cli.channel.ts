@@ -50,10 +50,10 @@ export class CLIChannel extends BaseChannel {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-              ErrorCode.CHANNEL_CONNECTION_FAILED,
-              'Failed to start CLI channel',
-              error instanceof Error ? error : undefined,
-            )
+            ErrorCode.CHANNEL_CONNECTION_FAILED,
+            'Failed to start CLI channel',
+            error instanceof Error ? error : undefined,
+          )
       logError(roxyError, 'error', 'CLIChannel')
       throw roxyError
     }
@@ -67,10 +67,10 @@ export class CLIChannel extends BaseChannel {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-              ErrorCode.RESOURCE_CLEANUP_FAILED,
-              'Failed to cleanup CLI channel resources',
-              error instanceof Error ? error : undefined,
-            ),
+            ErrorCode.RESOURCE_CLEANUP_FAILED,
+            'Failed to cleanup CLI channel resources',
+            error instanceof Error ? error : undefined,
+          ),
         'warn',
         'CLIChannel',
       )
@@ -309,9 +309,9 @@ export class CLIChannel extends BaseChannel {
     }
 
     // 显示 SubAgent 启动通知
-    console.log(chalk.cyan.dim(`\n└─ 🚀 SubAgent [${event.label}] started`))
+    console.log(chalk.cyan(`\n└─ 🚀 SubAgent [${event.label}] started`))
     console.log(
-      chalk.gray.dim(`   Task: ${event.task.slice(0, 100)}${event.task.length > 100 ? '...' : ''}`),
+      chalk.cyan(`   Task: ${event.task.slice(0, 100)}${event.task.length > 100 ? '...' : ''}`),
     )
     console.log()
   }
@@ -326,7 +326,7 @@ export class CLIChannel extends BaseChannel {
     const statusIcon = event.success ? chalk.green('✅') : chalk.red('❌')
     const statusText = event.success ? 'completed' : 'failed'
 
-    console.log(chalk.dim(`\n└─ ${statusIcon} SubAgent [${event.label}] ${statusText}`))
+    console.log(chalk.cyan(`\n└─ ${statusIcon} SubAgent [${event.label}] ${statusText}`))
 
     // 显示结果
     if (event.result) {

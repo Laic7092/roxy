@@ -148,7 +148,7 @@ export class SubAgentManager {
 
     executionPromise.finally(cleanup)
 
-    log('info', `Spawned subagent [${taskId}]: ${displayLabel}`, 'SubAgentManager')
+    log('debug', `Spawned subagent [${taskId}]: ${displayLabel}`, 'SubAgentManager')
 
     // 发布 SubAgent 开始事件
     this.eventBus.publishSubAgentStart({
@@ -166,7 +166,7 @@ export class SubAgentManager {
    * 执行 SubAgent 任务
    */
   private async runSubAgent(task: SubAgentTask): Promise<void> {
-    log('info', `Subagent [${task.id}] starting task: ${task.label}`, 'SubAgentManager')
+    log('debug', `Subagent [${task.id}] starting task: ${task.label}`, 'SubAgentManager')
 
     try {
       task.status = 'running'
@@ -245,7 +245,7 @@ export class SubAgentManager {
       task.result = finalResult
       task.completedAt = new Date()
 
-      log('info', `Subagent [${task.id}] completed successfully`, 'SubAgentManager')
+      log('debug', `Subagent [${task.id}] completed successfully`, 'SubAgentManager')
 
       // 通知主 Agent
       await this.announceResult(task, 'ok')
@@ -258,10 +258,10 @@ export class SubAgentManager {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-              ErrorCode.SYSTEM_ERROR,
-              `Subagent [${task.id}] failed`,
-              error instanceof Error ? error : undefined,
-            ),
+            ErrorCode.SYSTEM_ERROR,
+            `Subagent [${task.id}] failed`,
+            error instanceof Error ? error : undefined,
+          ),
         'error',
         'SubAgentManager',
       )
