@@ -2,6 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { join, extname, basename, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { v4 as uuidv4 } from 'uuid'
+import { createLogger, LogLevel } from '../utils/logger'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -19,11 +20,17 @@ export interface ToolFunction {
 export class ToolExecutor {
   private tools: Map<string, ToolFunction> = new Map()
   private workspace: string
+  private logger: ReturnType<typeof createLogger>
   private initializationPromise: Promise<void>
 
   constructor(workspace: string) {
     this.workspace = workspace
-    // 初始化工具注册，并保存Promise以供后续等待
+    // 默认只显示 INFO 及以上级别的日志到控制台
+    this.logger = createLogger(workspace, { 
+      logToConsole: true,
+      enabledLevels: [LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.SUCCESS]
+    })
+    // 初始化工具注册，并保存 Promise 以供后续等待
     this.initializationPromise = this.initializeTools(__dirname)
   }
 
@@ -73,11 +80,12 @@ export class ToolExecutor {
                 // 检查是否为工具函数格式
                 if (this.isToolFunctionFormat(exportedItem)) {
                   if (this.tools.has(exportedItem.name)) {
-                    console.warn(
+                    await this.logger.warn(
                       `Tool ${exportedItem.name} is already registered and will be overwritten.`,
                     )
                   }
                   this.tools.set(exportedItem.name, exportedItem)
+                  await this.logger.debug(`Tool registered: ${exportedItem.name}`)
                 }
 
                 // 检查是否为工具数组
@@ -85,23 +93,30 @@ export class ToolExecutor {
                   for (const tool of exportedItem) {
                     if (this.isToolFunctionFormat(tool)) {
                       if (this.tools.has(tool.name)) {
-                        console.warn(
+                        await this.logger.warn(
                           `Tool ${tool.name} is already registered and will be overwritten.`,
                         )
                       }
                       this.tools.set(tool.name, tool)
+                      await this.logger.debug(`Tool registered: ${tool.name}`)
                     }
                   }
                 }
               }
             } catch (importError) {
-              console.error(`Error importing tool file ${filePath}:`, importError)
+              await this.logger.error(`Error importing tool file ${filePath}`, {
+                error: importError instanceof Error ? importError.message : String(importError),
+              })
             }
           }
         }
       }
+
+      await this.logger.debug(`Tool scanning completed. Total tools: ${this.tools.size}`)
     } catch (error) {
-      console.error('Error auto-registering tools:', error)
+      await this.logger.error('Error auto-registering tools', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -138,7 +153,7 @@ export class ToolExecutor {
    * 执行指定的工具
    * @param toolName 工具名称
    * @param argumentsObj 参数对象
-   * @param providedId 如果AI提供了ID则使用该ID，否则生成新ID
+   * @param providedId 如果 AI 提供了 ID 则使用该 ID，否则生成新 ID
    */
   async executeTool(
     toolName: string,
@@ -149,6 +164,11 @@ export class ToolExecutor {
     // 等待初始化完成
     await this.initializationPromise
 
+    await this.logger.debug(`Executing tool: ${toolName}`, {
+      arguments: argumentsObj,
+      context,
+    })
+
     // 对于 spawn_subagent，设置执行上下文
     if (toolName === 'spawn_subagent' && context) {
       const { setExecContext } = await import('./SpawnTool')
@@ -157,6 +177,7 @@ export class ToolExecutor {
     const tool = this.tools.get(toolName)
 
     if (!tool) {
+      await this.logger.error(`Tool not found: ${toolName}`)
       return {
         result: { success: false, error: `Tool '${toolName}' not found` },
         tool_call_id: providedId || `call_${uuidv4()}`,
@@ -165,15 +186,24 @@ export class ToolExecutor {
 
     try {
       const { success, ...rest } = await tool.execute(argumentsObj, this.workspace)
+      const result = Object.entries(rest)[0]
+        ? this.formatToolOutput(Object.entries(rest)[0][1])
+        : 'success'
+
+      await this.logger.debug(`Tool executed successfully: ${toolName}`, {
+        result: result.substring(0, 100) + (result.length > 100 ? '...' : ''),
+      })
+
       return {
-        result: Object.entries(rest)[0]
-          ? this.formatToolOutput(Object.entries(rest)[0][1])
-          : 'success',
+        result,
         tool_call_id: providedId || `call_${uuidv4()}`,
       }
     } catch (error) {
+      await this.logger.error(`Tool execution failed: ${toolName}`, {
+        error: error instanceof Error ? error.message : String(error),
+      })
       return {
-        result: { success: false, error: error.message },
+        result: { success: false, error: error instanceof Error ? error.message : String(error) },
         tool_call_id: providedId || `call_${uuidv4()}`,
       }
     }
@@ -181,7 +211,7 @@ export class ToolExecutor {
 
   /**
    * 执行多个工具调用
-   * @param toolCalls 工具调用数组，每个元素包含name, arguments和可选的id
+   * @param toolCalls 工具调用数组，每个元素包含 name, arguments 和可选的 id
    */
   async executeTools(
     toolCalls: Array<{ name: string; arguments: string; id?: string }>,
@@ -196,6 +226,10 @@ export class ToolExecutor {
     // 等待初始化完成
     await this.initializationPromise
 
+    await this.logger.debug(`Executing ${toolCalls.length} tool(s)`, {
+      tools: toolCalls.map((t) => t.name),
+    })
+
     const results = await Promise.all(
       toolCalls.map(async ({ name, arguments: argsStr, id }) => {
         try {
@@ -208,16 +242,24 @@ export class ToolExecutor {
             name,
           }
         } catch (error) {
+          await this.logger.error(`Invalid arguments for tool: ${name}`, {
+            error: error instanceof Error ? error.message : String(error),
+          })
           return {
             result: {
               success: false,
-              error: `Invalid arguments for tool '${name}': ${error.message}`,
+              error: `Invalid arguments for tool '${name}': ${error instanceof Error ? error.message : String(error)}`,
             },
             tool_call_id: id || `call_${uuidv4()}`,
             name,
           }
         }
       }),
+    )
+
+    const successCount = results.filter((r) => !r.result?.success === false).length
+    await this.logger.debug(
+      `Tool execution completed: ${successCount}/${toolCalls.length} successful`,
     )
 
     return results
@@ -246,10 +288,11 @@ export class ToolExecutor {
    */
   registerTool(toolDefinition: ToolFunction): boolean {
     if (this.tools.has(toolDefinition.name)) {
-      console.warn(`Tool ${toolDefinition.name} is already registered and will be overwritten.`)
+      this.logger.warn(`Tool ${toolDefinition.name} is already registered and will be overwritten.`)
     }
 
     this.tools.set(toolDefinition.name, toolDefinition)
+    this.logger.debug(`Tool registered: ${toolDefinition.name}`)
     return true
   }
 
@@ -259,6 +302,11 @@ export class ToolExecutor {
    * @returns 是否注销成功
    */
   unregisterTool(toolName: string): boolean {
-    return this.tools.delete(toolName)
+    const existed = this.tools.has(toolName)
+    const result = this.tools.delete(toolName)
+    if (result) {
+      this.logger.debug(`Tool unregistered: ${toolName}`)
+    }
+    return result
   }
 }
