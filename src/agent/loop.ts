@@ -90,9 +90,6 @@ export class AgentLoop {
       return
     }
 
-    // 添加结果到会话
-    this.session.addMessage('assistant', event.result)
-
     log('debug', `SubAgent [${event.taskId}] result saved to session`, 'AgentLoop')
   }
 
@@ -108,9 +105,6 @@ export class AgentLoop {
 
       // 获取或创建会话
       this.session = await this.getOrCreateSession(task.sessionId)
-
-      // 添加用户消息
-      this.session.addMessage('user', task.content)
 
       // 构建上下文
       let contextMessages = await this.context.buildContext(this.session.messages)
@@ -155,7 +149,18 @@ export class AgentLoop {
           )
 
           // 检查是否需要执行工具调用
-          const toolCalls = result?.choices?.[0]?.message?.tool_calls
+          const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
+
+
+          this.eventBus.publishAgentResponse({
+            agentId: this.config.id,
+            taskId: task.id,
+            channelId: task.channelId,
+            sessionId: task.sessionId,
+            content: content,
+            toolCalls,
+          })
+          aiResponse = content
 
           if (toolCalls && toolCalls.length > 0) {
             hasToolCalls = true
@@ -207,37 +212,9 @@ export class AgentLoop {
               })
             }
 
-            // 将工具调用结果添加到消息历史中
-            const { content, tool_calls } = result?.choices?.[0]?.message
-            let init = false
-            for (const toolResult of toolResults) {
-              if (!init) {
-                this.session.addMessage('assistant', content ?? '', tool_calls)
-                init = true
-              }
-              this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
-            }
-
             // 重新构建上下文
             contextMessages = await this.context.buildContext(this.session.messages)
           } else {
-            // 没有工具调用，处理最终的 AI 响应
-            if (result && result.choices && result.choices[0] && result.choices[0].message) {
-              const { content } = result.choices[0].message
-              if (content) {
-                this.session.addMessage('assistant', content)
-                aiResponse = content
-
-                // 发布最终响应事件
-                this.eventBus.publishAgentResponse({
-                  agentId: this.config.id,
-                  taskId: task.id,
-                  channelId: task.channelId,
-                  sessionId: task.sessionId,
-                  content: content,
-                })
-              }
-            }
             break
           }
         } catch (error) {
@@ -245,10 +222,10 @@ export class AgentLoop {
             error instanceof RoxyError
               ? error
               : new RoxyError(
-                  ErrorCode.LLM_API_ERROR,
-                  `AgentLoop iteration ${iteration} failed`,
-                  error instanceof Error ? error : undefined,
-                )
+                ErrorCode.LLM_API_ERROR,
+                `AgentLoop iteration ${iteration} failed`,
+                error instanceof Error ? error : undefined,
+              )
 
           logError(roxyError, 'warn', 'AgentLoop')
 
@@ -274,17 +251,7 @@ export class AgentLoop {
       task.status = TaskStatus.COMPLETED
       task.result = aiResponse
       task.completedAt = new Date()
-      
-      // If no response was published (e.g., LLM returned empty content), publish now
-      if (!aiResponse && this.session.messages.length > 0) {
-        this.eventBus.publishAgentResponse({
-          agentId: this.config.id,
-          taskId: task.id,
-          channelId: task.channelId,
-          sessionId: task.sessionId,
-          content: '',
-        })
-      }
+
     } catch (error) {
       // 任务失败
       task.status = TaskStatus.FAILED
@@ -295,10 +262,10 @@ export class AgentLoop {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-              ErrorCode.SYSTEM_ERROR,
-              'AgentLoop.executeTask failed',
-              error instanceof Error ? error : undefined,
-            )
+            ErrorCode.SYSTEM_ERROR,
+            'AgentLoop.executeTask failed',
+            error instanceof Error ? error : undefined,
+          )
 
       logError(roxyError, 'error', 'AgentLoop')
 

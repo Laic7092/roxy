@@ -53,6 +53,7 @@ export class Session {
 
       this.messages.push(message)
     } else {
+      content || (content = '')
       const message: Message = {
         role,
         content,
@@ -117,7 +118,7 @@ export class SessionManager {
     // 监听 Agent 响应 - 添加消息并自动保存
     this.eventBus.on('agent:response', async (event) => {
       const session = await this.getOrCreate(event.sessionId)
-      session.addMessage('assistant', event.content)
+      session.addMessage('assistant', event.content, event.toolCalls)
       await this.save(event.sessionId)
     })
 

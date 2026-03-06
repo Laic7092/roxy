@@ -135,7 +135,7 @@ export class CLIChannel extends BaseChannel {
 
     this.eventBus.on('agent:response', (event) => {
       if (event.channelId === this.id) {
-        this.showResponse()
+        this.showResponse(event.content)
       }
     })
 
@@ -257,15 +257,15 @@ export class CLIChannel extends BaseChannel {
     process.stdout.write(chunk)
   }
 
-  private showResponse(): void {
+  private showResponse(content: string): void {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
       this.spinner = null
     }
-
     process.stdout.write('\n')
     this.isWaitingResponse = false
     this.aiResponse = ''
+    // console.log(content)
     this.showPrompt()
   }
 
