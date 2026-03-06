@@ -9,7 +9,8 @@ import { getEventBus } from '../../bus/instance'
 import { AgentFactory } from '../../agent/factory'
 import { AgentOrchestrator } from '../../orchestrator/orchestrator'
 import { SubAgentManager } from '../../agent/subAgent'
-import { setSubAgentManager } from '../../tools/SpawnTool'
+import { createSpawnTools } from '../../tools/SpawnTool'
+import { createCronTools } from '../../tools/CronTool'
 
 export const AgentCommand = new Command('agent')
 
@@ -53,7 +54,7 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       // 初始化 ToolExecutor
       const toolExecutor = new ToolExecutor(workspace)
 
-      // 初始化 SubAgentManager 并注册到全局
+      // 初始化 SubAgentManager
       const subAgentManager = new SubAgentManager({
         provider,
         eventBus,
@@ -61,7 +62,22 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
         toolExecutor,
         workspace,
       })
-      setSubAgentManager(subAgentManager)
+
+      // 注册需要上下文的 Tool（在知道 sessionId 后）
+      const toolContext = { channelId: 'cli', sessionId }
+      toolExecutor.setContext(toolContext)
+
+      // 注册 SpawnTool
+      const spawnTools = createSpawnTools(subAgentManager, toolContext)
+      spawnTools.forEach((tool) => toolExecutor.registerTool(tool))
+
+      // 注册 CronTool
+      const cronTools = createCronTools({
+        ...toolContext,
+        workspace,
+        eventBus,
+      })
+      cronTools.forEach((tool) => toolExecutor.registerTool(tool))
 
       // 创建 AgentFactory
       const agentFactory = new AgentFactory({

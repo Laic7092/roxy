@@ -14,7 +14,7 @@ export interface ToolFunction {
     properties: Record<string, any>
     required: string[]
   }
-  execute: (args: any, workspace: string) => Promise<any>
+  execute: (args: any, workspace: string, context?: { channelId: string; sessionId: string }) => Promise<any>
 }
 
 export class ToolExecutor {
@@ -22,16 +22,24 @@ export class ToolExecutor {
   private workspace: string
   private logger: ReturnType<typeof createLogger>
   private initializationPromise: Promise<void>
+  private context: { channelId: string; sessionId: string } | null = null
 
   constructor(workspace: string) {
     this.workspace = workspace
     // 默认只显示 INFO 及以上级别的日志到控制台
-    this.logger = createLogger(workspace, { 
+    this.logger = createLogger(workspace, {
       logToConsole: true,
       enabledLevels: [LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.SUCCESS]
     })
     // 初始化工具注册，并保存 Promise 以供后续等待
     this.initializationPromise = this.initializeTools(__dirname)
+  }
+
+  /**
+   * 设置执行上下文（用于需要上下文的 Tool）
+   */
+  setContext(context: { channelId: string; sessionId: string }): void {
+    this.context = context
   }
 
   /**
@@ -62,12 +70,14 @@ export class ToolExecutor {
             extname(file) === '.mjs' ||
             extname(file) === '.cjs')
         ) {
-          // 跳过自身和其他非工具文件
+          // 跳过自身、索引文件、以及需要手动注册的特殊 Tool
           if (
             basename(file, extname(file)) !== 'ToolExecutor' &&
             basename(file, extname(file)) !== 'index' &&
             basename(file, extname(file)) !== 'ToolRegistry' &&
-            basename(file, extname(file)) !== 'ToolRegistrar'
+            basename(file, extname(file)) !== 'ToolRegistrar' &&
+            basename(file, extname(file)) !== 'CronTool' && // 需要手动注册（需要上下文）
+            basename(file, extname(file)) !== 'SpawnTool'   // 需要手动注册（需要上下文）
           ) {
             try {
               // 动态导入工具文件
@@ -162,19 +172,15 @@ export class ToolExecutor {
     providedId?: string,
     context?: { channelId?: string; sessionId?: string },
   ): Promise<{ result: any; tool_call_id: string }> {
-    // 等待初始化完成
     await this.initializationPromise
+
+    // 优先使用传入的 context，否则使用存储的 context
+    const execContext = context || this.context
 
     await this.logger.debug(`Executing tool: ${toolName}`, {
       arguments: argumentsObj,
-      context,
+      context: execContext,
     })
-
-    // 对于 spawn，设置执行上下文（向后兼容）
-    if (toolName === 'spawn' && context) {
-      const { setExecContext } = await import('./SpawnTool')
-      setExecContext({ channelId: context.channelId!, sessionId: context.sessionId! })
-    }
 
     const tool = this.tools.get(toolName)
 
@@ -187,7 +193,9 @@ export class ToolExecutor {
     }
 
     try {
-      const resultObj = await tool.execute(argumentsObj, this.workspace)
+      const resultObj = execContext
+        ? await tool.execute(argumentsObj, this.workspace, execContext)
+        : await tool.execute(argumentsObj, this.workspace)
       const { success, ...rest } = resultObj
       const result = Object.entries(rest)[0]
         ? this.formatToolOutput(Object.entries(rest)[0][1])

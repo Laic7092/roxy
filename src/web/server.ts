@@ -11,6 +11,9 @@ import { loadConfig } from '../config/manager'
 import { getEventBus } from '../bus/instance'
 import { AgentFactory } from '../agent/factory'
 import { AgentOrchestrator } from '../orchestrator/orchestrator'
+import { SubAgentManager } from '../agent/subAgent'
+import { createSpawnTools } from '../tools/SpawnTool'
+import { createCronTools } from '../tools/CronTool'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -39,6 +42,8 @@ const wss = new WebSocketServer({ server })
 let sessionManager: SessionManager | null = null
 let orchestrator: AgentOrchestrator | null = null
 let workspace: string | null = null
+let subAgentManager: SubAgentManager | null = null
+let toolExecutor: ToolExecutor | null = null
 
 // 初始化系统
 async function initSystem() {
@@ -66,7 +71,16 @@ async function initSystem() {
   })
 
   // 初始化 ToolExecutor
-  const toolExecutor = new ToolExecutor(workspace)
+  toolExecutor = new ToolExecutor(workspace)
+
+  // 初始化 SubAgentManager
+  subAgentManager = new SubAgentManager({
+    provider,
+    eventBus,
+    sessionManager,
+    toolExecutor,
+    workspace,
+  })
 
   // 创建 AgentFactory
   const agentFactory = new AgentFactory({
@@ -110,6 +124,25 @@ wss.on('connection', async (ws) => {
 
   // 启动 Channel
   await channel.start()
+
+  // 注册需要上下文的 Tool（在知道 sessionId 后）
+  const sessionId = channel.sessionId
+  if (sessionId && subAgentManager && workspace && toolExecutor && eventBus) {
+    const toolContext = { channelId: 'web', sessionId }
+    toolExecutor.setContext(toolContext)
+
+    // 注册 SpawnTool
+    const spawnTools = createSpawnTools(subAgentManager, toolContext)
+    spawnTools.forEach((tool) => toolExecutor!.registerTool(tool))
+
+    // 注册 CronTool
+    const cronTools = createCronTools({
+      ...toolContext,
+      workspace,
+      eventBus,
+    })
+    cronTools.forEach((tool) => toolExecutor!.registerTool(tool))
+  }
 })
 
 // 从环境变量或默认值获取端口和主机
