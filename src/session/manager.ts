@@ -108,42 +108,25 @@ export class SessionManager {
   private setupEventHandlers(): void {
     if (!this.eventBus) return
 
-    // 监听用户消息
-    this.eventBus.on('user:message', (event) => {
-      this.appendMessage(event.sessionId, 'user', event.content)
+    // 监听用户消息 - 获取或创建会话并添加消息
+    this.eventBus.on('user:message', async (event) => {
+      const session = await this.getOrCreate(event.sessionId)
+      session.addMessage('user', event.content)
     })
 
-    // 监听 Agent 响应
-    this.eventBus.on('agent:response', (event) => {
-      this.appendMessage(event.sessionId, 'assistant', event.content)
-      this.save(event.sessionId) // 自动保存
+    // 监听 Agent 响应 - 添加消息并自动保存
+    this.eventBus.on('agent:response', async (event) => {
+      const session = await this.getOrCreate(event.sessionId)
+      session.addMessage('assistant', event.content)
+      await this.save(event.sessionId)
     })
 
-    // 监听工具结果
-    this.eventBus.on('agent:tool_result', (event) => {
-      this.appendToolMessage(event.sessionId, event.toolResult, event.toolCallId)
-      this.save(event.sessionId) // 自动保存
+    // 监听工具结果 - 添加消息并自动保存
+    this.eventBus.on('agent:tool_result', async (event) => {
+      const session = await this.getOrCreate(event.sessionId)
+      session.addMessage('tool', event.toolResult, event.toolCallId)
+      await this.save(event.sessionId)
     })
-  }
-
-  /**
-   * 添加消息到会话
-   */
-  appendMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): void {
-    const session = this.sessions.get(sessionId)
-    if (session) {
-      session.addMessage(role, content)
-    }
-  }
-
-  /**
-   * 添加工具消息到会话
-   */
-  appendToolMessage(sessionId: string, content: string, toolCallId: string): void {
-    const session = this.sessions.get(sessionId)
-    if (session) {
-      session.addMessage('tool', content, toolCallId)
-    }
   }
 
   private async ensureDir() {

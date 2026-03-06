@@ -8,7 +8,6 @@ import { loadConfig } from '../../config/manager'
 import { getEventBus } from '../../bus/instance'
 import { AgentFactory } from '../../agent/factory'
 import { AgentOrchestrator } from '../../orchestrator/orchestrator'
-import { AgentRole } from '../../agent/types'
 import { SubAgentManager } from '../../agent/subAgent'
 import { setSubAgentManager } from '../../tools/SpawnTool'
 

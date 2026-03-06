@@ -1,5 +1,5 @@
 import LLMProvider from './base'
-import { RoxyError, ErrorCode, isRecoverableError } from '../types/errors'
+import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log, sleep } from '../utils/error-handler'
 
 export class LiteLLMProvider extends LLMProvider {

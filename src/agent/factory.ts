@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRole } from './types'
+import type { AgentConfig } from './types'
 import type { LiteLLMProvider } from '../provider/llm'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 import type { EventBus } from '../bus/instance'

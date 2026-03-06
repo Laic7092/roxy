@@ -107,6 +107,7 @@ export interface AgentSpawnEvent {
 
 /**
  * Agent 委托事件（Parent Agent → SubAgent）
+ * @deprecated Use SubAgentManager.spawn() instead
  */
 export interface AgentDelegateEvent {
   parentId: string
@@ -150,15 +151,6 @@ export interface SubAgentCompleteEvent {
   /** 错误信息（失败时） */
   error?: string
   timestamp: Date
-}
-
-/**
- * Team 广播事件（Team Lead → Members）
- */
-export interface TeamBroadcastEvent {
-  teamId: string
-  task: string
-  parallel: boolean
 }
 
 /**
@@ -216,12 +208,9 @@ export interface EventMap {
   'agent:spawn': AgentSpawnEvent
 
   // SubAgent 委托
-  'agent:delegate': AgentDelegateEvent
+  'agent:delegate': AgentDelegateEvent // @deprecated Use SubAgentManager.spawn()
   'subagent:start': SubAgentStartEvent
   'subagent:complete': SubAgentCompleteEvent
-
-  // Team 协作
-  'team:broadcast': TeamBroadcastEvent
 
   // 会话管理
   'session:save': SessionSaveEvent

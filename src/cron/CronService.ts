@@ -143,29 +143,20 @@ export class CronService {
                 ? nextDates[0].toDate() 
                 : nextDates[0]
             }
-          } catch (e) {
+          } catch (_e) {
             // Ignore if nextDates is not available
           }
         }
 
         // Execute based on job type
-        if (job.type === CronJobType.REMINDER) {
-          // Send reminder directly to user via stream event (won't trigger agent loop)
-          this.eventBus.emit('agent:stream', {
-            agentId: 'cron-service',
-            taskId: `cron-${job.id}`,
-            channelId: job.channelId,
-            sessionId: job.sessionId,
-            chunk: `⏰ **Reminder**: ${job.message}`,
-            timestamp: new Date(),
-          })
-        } else if (job.type === CronJobType.TASK) {
-          // For task type, we need to trigger agent processing
-          // Publish as user message for agent to process
+        // Both REMINDER and TASK types publish user:message to trigger proper agent flow
+        // This ensures session consistency and proper event handling
+        if (job.type === CronJobType.REMINDER || job.type === CronJobType.TASK) {
+          const prefix = job.type === CronJobType.REMINDER ? '⏰ Reminder: ' : '[Scheduled Task] '
           this.eventBus.publishUserMessage({
             channelId: job.channelId,
             sessionId: job.sessionId,
-            content: `[Scheduled Task] ${job.message}`,
+            content: `${prefix}${job.message}`,
           })
         }
 
@@ -321,7 +312,7 @@ export class CronService {
             job.nextExecution = nextDates[0]
           }
         }
-      } catch (e) {
+      } catch (_e) {
         // Ignore if nextDates is not available
       }
       

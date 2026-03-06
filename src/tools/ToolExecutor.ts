@@ -154,6 +154,7 @@ export class ToolExecutor {
    * @param toolName 工具名称
    * @param argumentsObj 参数对象
    * @param providedId 如果 AI 提供了 ID 则使用该 ID，否则生成新 ID
+   * @param context 执行上下文（channelId, sessionId）
    */
   async executeTool(
     toolName: string,
@@ -169,11 +170,12 @@ export class ToolExecutor {
       context,
     })
 
-    // 对于 spawn_subagent，设置执行上下文
-    if (toolName === 'spawn_subagent' && context) {
+    // 对于 spawn，设置执行上下文（向后兼容）
+    if (toolName === 'spawn' && context) {
       const { setExecContext } = await import('./SpawnTool')
-      setExecContext(context)
+      setExecContext({ channelId: context.channelId!, sessionId: context.sessionId! })
     }
+
     const tool = this.tools.get(toolName)
 
     if (!tool) {
@@ -185,7 +187,8 @@ export class ToolExecutor {
     }
 
     try {
-      const { success, ...rest } = await tool.execute(argumentsObj, this.workspace)
+      const resultObj = await tool.execute(argumentsObj, this.workspace)
+      const { success, ...rest } = resultObj
       const result = Object.entries(rest)[0]
         ? this.formatToolOutput(Object.entries(rest)[0][1])
         : 'success'
@@ -302,7 +305,6 @@ export class ToolExecutor {
    * @returns 是否注销成功
    */
   unregisterTool(toolName: string): boolean {
-    const existed = this.tools.has(toolName)
     const result = this.tools.delete(toolName)
     if (result) {
       this.logger.debug(`Tool unregistered: ${toolName}`)

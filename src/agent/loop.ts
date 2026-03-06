@@ -1,13 +1,12 @@
 import type { LiteLLMProvider } from '../provider/llm'
 import type { ContextMng } from './context'
-import type { Session, SessionMessage, SessionManager } from '../session/manager'
+import type { Session, SessionManager } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 import type { EventBus } from '../bus/instance'
 import type { AgentConfig, AgentTask } from './types'
 import { TaskStatus } from './types'
-import { RoxyError, ErrorCode, isRecoverableError } from '../types/errors'
+import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log, withTimeout } from '../utils/error-handler'
-import { v4 as uuidv4 } from 'uuid'
 
 export interface AgentLoopDeps {
   config: AgentConfig

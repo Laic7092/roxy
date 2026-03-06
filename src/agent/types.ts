@@ -1,7 +1,5 @@
 /**
  * Agent 类型定义
- *
- * 支持主 Agent、SubAgent 和 Agent Teams
  */
 
 /**
@@ -12,8 +10,6 @@ export enum AgentRole {
   MAIN = 'main',
   /** SubAgent，处理专门任务 */
   SUB = 'sub',
-  /** Team Leader，协调多个 Agent */
-  TEAM_LEAD = 'team_lead',
 }
 
 /**
@@ -77,63 +73,4 @@ export interface AgentTask {
   createdAt: Date
   /** 完成时间 */
   completedAt?: Date
-}
-
-/**
- * Agent Team 成员定义
- */
-export interface TeamMember {
-  /** Agent ID */
-  agentId: string
-  /** 在团队中的角色 */
-  role: string
-  /** 专用系统提示词（可选） */
-  systemPrompt?: string
-}
-
-/**
- * Agent Team 定义
- */
-export interface AgentTeam {
-  /** 团队唯一标识 */
-  id: string
-  /** 团队名称 */
-  name: string
-  /** Team Leader Agent ID */
-  lead: string
-  /** 团队成员列表 */
-  members: TeamMember[]
-  /** 团队配置 */
-  config?: {
-    /** 是否并行执行 */
-    parallel?: boolean
-    /** 是否需要汇总结果 */
-    aggregateResults?: boolean
-  }
-}
-
-/**
- * SubAgent 委托请求
- */
-export interface DelegationRequest {
-  /** 父任务 ID */
-  parentId: string
-  /** 子任务内容 */
-  subTask: string
-  /** 目标 SubAgent 类型 */
-  agentType: string
-  /** 期望的结果格式（可选） */
-  expectedOutput?: string
-}
-
-/**
- * Team 任务广播请求
- */
-export interface TeamBroadcastRequest {
-  /** 团队 ID */
-  teamId: string
-  /** 任务内容 */
-  task: string
-  /** 是否并行执行 */
-  parallel?: boolean
 }
