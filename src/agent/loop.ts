@@ -271,10 +271,21 @@ export class AgentLoop {
         this.session.addMessage('assistant', '工具调用次数过多，请简化您的请求。')
       }
 
-      // 任务完成
+      // 任务完成 - 如果没有发布过响应事件，则发布一个空响应
       task.status = TaskStatus.COMPLETED
       task.result = aiResponse
       task.completedAt = new Date()
+      
+      // If no response was published (e.g., LLM returned empty content), publish now
+      if (!aiResponse && this.session.messages.length > 0) {
+        this.eventBus.publishAgentResponse({
+          agentId: this.config.id,
+          taskId: task.id,
+          channelId: task.channelId,
+          sessionId: task.sessionId,
+          content: '',
+        })
+      }
     } catch (error) {
       // 任务失败
       task.status = TaskStatus.FAILED

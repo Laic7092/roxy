@@ -123,5 +123,9 @@ export class AgentFactory {
     for (const agentId of this.agents.keys()) {
       await this.destroyAgent(agentId)
     }
+
+    // Clean up cron services
+    const { clearAllCronServices } = await import('../tools/CronTool')
+    await clearAllCronServices()
   }
 }
