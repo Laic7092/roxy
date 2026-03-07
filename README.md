@@ -1,246 +1,91 @@
 # Roxy
 
-Roxy 是一个 AI 助手，支持 CLI 和 Web 多种交互方式。
+> AI Assistant CLI & Framework
 
-## 特性
+一个基于事件驱动的 AI 助手框架，支持多 LLM 提供商、工具调用和会话管理。
 
-- 🤖 **多模态交互** - CLI 和 Web 两种交互方式
-- 💾 **会话持久化** - 自动保存对话历史到本地
-- 🔧 **工具系统** - 支持扩展工具调用
-- 🎨 **流式响应** - 实时显示 AI 回复
-- 📦 **模块化架构** - 基于消息总线的分层设计
+## ✨ 特性
 
-## 安装
+- 🚀 **事件驱动架构** - 基于事件总线的模块化设计
+- 🛠️ **工具系统** - 内置文件系统、命令执行、定时任务等工具
+- 💬 **会话管理** - 持久化会话和历史记录
+- 🔌 **多 LLM 支持** - Ollama、DeepSeek 等提供商
+- 🎯 **技能扩展** - 可扩展的技能系统
+- 📦 **CLI 工具** - 命令行界面，易于集成
 
-```bash
-npm install -g roxy
-```
-
-或者使用 pnpm:
+## 📦 安装
 
 ```bash
-pnpm add -g roxy
-```
-
-## 使用方法
-
-### 初始化配置
-
-首次使用前，需要初始化配置文件：
-
-```bash
-roxy onboard
-```
-
-这将在 `~/.roxy/` 创建主配置目录，并在其中创建：
-- `config.json` - 主配置文件
-- `workspace/` - 工作空间目录，包含：
-  - `USER.md` - 用户信息
-  - `MEMORY.md` - 记忆存储
-  - `SOUL.md` - 核心身份和价值观
-  - `AGENT.md` - 代理配置
-  - `HISTORY.md` - 历史日志
-
-您需要编辑 `~/.roxy/config.json` 文件并添加您的 API 密钥。
-
-### 交互式对话（CLI）
-
-启动交互式 AI 对话：
-
-```bash
-roxy agent
-```
-
-您可以指定会话 ID：
-
-```bash
-roxy agent --session my-session
-```
-
-要清除当前会话历史：
-
-```bash
-roxy agent --clear
-```
-
-**CLI 命令**：
-- `/help` - 显示帮助信息
-- `/clear` - 清除会话历史
-- `/history` - 显示会话历史
-- `/skills` - 重新加载技能
-- `/exit` - 退出会话
-
-**会话持久化**：
-- 所有会话会自动保存到 `~/.roxy/sessions/` 目录
-- 每次消息处理后自动持久化，重启后会话历史依然存在
-- 使用相同 `--session` ID 可恢复之前的对话
-
-### Web 界面
-
-启动 Web 服务器：
-
-```bash
-roxy web
-```
-
-选项：
-- `-p, --port <port>` - 指定端口（默认：3000）
-- `--host <host>` - 指定主机（默认：127.0.0.1）
-- `--no-open` - 不自动打开浏览器
-
-**会话持久化**：
-- Web 会话同样会自动保存到 `~/.roxy/sessions/` 目录
-- 每个 WebSocket 连接拥有独立的会话
-- 刷新页面后，使用相同会话 ID 可恢复对话
-
-## 命令
-
-### `onboard`
-
-初始化工作区和配置文件：
-
-```bash
-roxy onboard [options]
-```
-
-选项:
-- `-f, --force` - 强制重新初始化，即使配置已存在
-
-### `agent`
-
-启动交互式 AI 代理（CLI 模式）：
-
-```bash
-roxy agent [options]
-```
-
-选项:
-- `-s, --session <sessionId>` - 指定要使用的会话 ID（默认为 "cli:default"）
-- `-c, --clear` - 清除当前会话历史
-
-### `web`
-
-启动 Web 服务器：
-
-```bash
-roxy web [options]
-```
-
-选项:
-- `-p, --port <port>` - 指定端口（默认：3000）
-- `--host <host>` - 指定主机（默认：127.0.0.1）
-- `--no-open` - 不自动打开浏览器
-
-## 配置
-
-配置文件位于 `~/.roxy/config.json`，示例配置如下：
-
-```json
-{
-  "workspace": "/home/user/.roxy/workspace",
-  "agents": {
-    "defaults": {
-      "model": "ollama/qwen3.5:9b"
-    }
-  },
-  "providers": {
-    "ollama": {
-      "apiKey": "ollama-local",
-      "baseURL": "http://localhost:11434/v1"
-    },
-    "deepseek": {
-      "apiKey": "your-api-key-here",
-      "baseURL": "https://api.deepseek.com"
-    }
-  }
-}
-```
-
-## 架构
-
-Roxy 采用分层架构设计：
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    MessageBus (单例)                         │
-│  ┌─────────────────┐    ┌─────────────────┐                │
-│  │  inbound Queue  │    │ outbound Queue  │                │
-│  │  (Channel→Agent)│    │  (Agent→Channel)│                │
-│  └─────────────────┘    └─────────────────┘                │
-└─────────────────────────────────────────────────────────────┘
-         ▲                    ▲                    ▲
-         │                    │                    │
-┌────────┴────────┐   ┌───────┴────────┐   ┌───────┴───────┐
-│  CLIChannel     │   │  WebChannel    │   │  AgentLoop    │
-│  (只负责 I/O)    │   │  (只负责 I/O)   │   │  (单例)        │
-└─────────────────┘   └────────────────┘   └───────────────┘
-                                              │
-                                              ▼
-                                    ┌─────────────────┐
-                                    │ SessionManager  │
-                                    │ (按 sessionId   │
-                                    │  隔离会话)       │
-                                    └─────────────────┘
-```
-
-### 核心组件
-
-| 组件 | 职责 |
-|------|------|
-| **Channel** | 负责输入输出，管理 Session 生命周期和持久化 |
-| **MessageBus** | 双队列事件总线，解耦 Channel 和 Agent |
-| **AgentLoop** | 单一实例，处理所有 Channel 的消息（无状态） |
-| **SessionManager** | 按 sessionId 管理会话，实现隔离和持久化 |
-
-### 会话管理
-
-- 会话 ID 格式：`cli:{name}`（CLI）或 `web:{id}`（Web）
-- 存储位置：`~/.roxy/sessions/{sessionId}.jsonl`
-- 存储格式：JSONL（每行一条 JSON 消息）
-- 自动保存：每次消息处理完成后自动持久化
-
-### 会话隔离策略
-
-| 场景 | SessionId 格式 | 说明 |
-|------|---------------|------|
-| CLI 默认 | `cli:default` | CLI 独立会话 |
-| CLI 多会话 | `cli:{name}` | CLI 多个独立会话 |
-| Web 默认 | `web:{随机 ID}` | 每个 Web 连接独立会话 |
-| Web 用户会话 | `web:{userId}` | 按用户隔离会话 |
-| 跨通道共享 | `shared:{name}` | CLI 和 Web 共享同一会话 |
-
-## 开发
-
-如果您想为 Roxy 贡献代码：
-
-```bash
-# 1. 克隆仓库
+# 克隆项目
 git clone <repository-url>
+cd roxy
 
-# 2. 安装依赖
+# 安装依赖
 pnpm install
 
-# 3. 构建项目
+# 构建
 pnpm build
-
-# 4. 运行测试
-pnpm test
-
-# 5. 开发模式
-pnpm dev
 ```
 
-### 开发命令
+## 🚀 快速开始
+
+### CLI 使用
 
 ```bash
-pnpm lint      # 运行代码检查
-pnpm lint:fix  # 自动修复问题
-pnpm fmt       # 格式化代码
-pnpm build     # 构建项目
-pnpm test      # 运行测试
-pnpm dev       # 开发模式
+# 初始化配置
+pnpm build
+node dist/cli/index.mjs
+
+# 运行 Web 服务器
+pnpm web
 ```
 
-## 许可证
+### 作为库使用
+
+```typescript
+import { AgentLoop } from './src/agent/loop'
+import { ToolExecutor } from './src/tools/ToolExecutor'
+import { Bus } from './src/bus/instance'
+
+// 创建实例
+const bus = new Bus()
+const toolExecutor = new ToolExecutor(workspacePath)
+const agent = new AgentLoop({ config, provider, toolExecutor, bus, context, sessionManager })
+```
+
+## 📁 项目结构
+
+```
+roxy/
+├── src/
+│   ├── agent/       # Agent 核心逻辑
+│   ├── bus/         # 事件总线
+│   ├── cli/         # CLI 命令
+│   ├── config/      # 配置管理
+│   ├── gateway/     # 网关层
+│   ├── provider/    # LLM 提供商
+│   ├── session/     # 会话管理
+│   ├── tools/       # 工具实现
+│   └── utils/       # 工具函数
+├── tests/           # 测试文件
+└── .roxy/           # 运行时数据
+```
+
+## 🛠️ 开发命令
+
+```bash
+pnpm dev          # 开发模式
+pnpm build        # 构建项目
+pnpm test         # 运行测试
+pnpm lint         # 代码检查
+pnpm fmt          # 格式化代码
+pnpm web          # 运行 Web 服务器
+```
+
+## 📖 文档
+
+- [QWEN.md](./QWEN.md) - 详细的开发文档和架构说明
+
+## 📄 许可证
 
 ISC

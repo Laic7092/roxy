@@ -1,523 +1,239 @@
-# Roxy Project Context
+# Roxy - AI Assistant
 
-## Project Overview
+## 项目概述
 
-**Roxy** is an AI assistant that supports both CLI and Web interaction modes. Built with TypeScript, it features an event-driven architecture with session management, streaming responses, and tool execution capabilities.
+Roxy 是一个基于事件驱动的 AI 助手框架，使用 TypeScript 开发。它支持多 LLM 提供商、工具调用、会话管理和技能扩展。
 
-### Core Architecture (Event-Driven)
+### 核心技术栈
+
+- **运行时**: Node.js (ESM)
+- **语言**: TypeScript 5.9+
+- **包管理器**: pnpm 10.29.2
+- **构建工具**: tsdown
+- **测试框架**: Vitest
+- **Linter**: oxlint
+- **Formatter**: oxfmt
+
+### 架构设计
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      EventBus (Singleton)                     │
-│  事件类型：                                                    │
-│  - user:message      (Channel → Orchestrator)                │
-│  - agent:response    (Agent → Channel/Session)               │
-│  - agent:stream      (Agent → Channel)                       │
-│  - agent:tool_call   (Agent → Executor)                      │
-│  - agent:tool_result (Executor → Agent)                      │
-│  - session:save      (Auto-triggered)                        │
-│  - agent:delegate    (Parent → SubAgent)                     │
-│  - team:broadcast    (Team Lead → Members)                   │
+│                         CLI Layer                            │
+│                    (src/cli/index.ts)                        │
 └─────────────────────────────────────────────────────────────┘
-         ▲                    ▲                    ▲
-         │                    │                    │
-┌────────┴────────┐   ┌───────┴────────┐   ┌───────┴───────┐
-│  CLIChannel     │   │  WebChannel    │   │  Orchestrator │
-│  (I/O only)     │   │  (I/O only)    │   │  (Routing)    │
-└─────────────────┘   └────────────────┘   └───────────────┘
-                                              │
-                    ┌─────────────────────────┼─────────────────────────┐
-                    │                         │                         │
-           ┌────────┴────────┐       ┌────────┴────────┐       ┌────────┴────────┐
-           │  MainAgent      │       │  SubAgent #1    │       │  SubAgent #2    │
-           │  (General)      │       │  (Code Expert)  │       │  (Doc Expert)   │
-           └─────────────────┘       └─────────────────┘       └─────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        Gateway                               │
+│              (src/gateway/gateway.ts)                        │
+│         ┌─────────────────────────────────────┐              │
+│         │           Event Bus                 │              │
+│         │         (src/bus/)                  │              │
+│         └─────────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│    Agent Loop    │ │   Sub Agents     │ │   Channels       │
+│  (src/agent/)    │ │  (src/agent/)    │ │ (src/channels/)  │
+└──────────────────┘ └──────────────────┘ └──────────────────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Tool Layer                              │
+│              (src/tools/ToolExecutor.ts)                     │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌───────────┐ │
+│  │ FileSystem │ │  Command   │ │   Cron     │ │  Skills   │ │
+│  └────────────┘ └────────────┘ └────────────┘ └───────────┘ │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Provider Layer                            │
+│              (src/provider/llm.ts)                           │
+│         (Ollama, DeepSeek, etc.)                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Design Principles
+### 核心模块
 
-1. **Event-Driven** - All components communicate via EventBus
-2. **Channel I/O Only** - Channels only handle input/output, no business logic
-3. **Session Auto-Save** - SessionManager listens to events and auto-persists
-4. **Agent Orchestration** - Orchestrator routes tasks to appropriate Agents
-5. **SubAgent Support** - Agents can delegate tasks to specialized SubAgents
-6. **Agent Teams** - Team Lead can broadcast tasks to multiple members
+| 模块 | 路径 | 职责 |
+|------|------|------|
+| **Agent Loop** | `src/agent/loop.ts` | 事件驱动的消息处理器，协调 LLM 对话和工具调用 |
+| **Tool Executor** | `src/tools/ToolExecutor.ts` | 工具注册、执行和错误处理 |
+| **Event Bus** | `src/bus/instance.ts` | 基于 mitt 的事件总线，解耦模块通信 |
+| **Session Manager** | `src/session/` | 会话管理和消息持久化 |
+| **Config Manager** | `src/config/manager.ts` | 配置加载和工作区初始化 |
+| **Provider** | `src/provider/llm.ts` | LLM 提供商抽象层 |
+| **Gateway** | `src/gateway/` | 外部请求入口和路由 |
+| **Channels** | `src/channels/` | 不同通信渠道实现 |
 
-### Component Responsibilities
+### 内置工具
 
-| Component | Responsibility |
-|-----------|----------------|
-| **Channel** | I/O only, publishes user messages, displays agent responses |
-| **EventBus** | Event hub for all component communication |
-| **Orchestrator** | Routes user messages to agents, manages teams |
-| **AgentFactory** | Creates and manages Agent instances |
-| **AgentLoop** | Processes tasks, handles LLM calls and tool execution |
-| **SessionManager** | Session persistence, listens to events for auto-save |
+- **FileSystemTools**: 文件系统操作（读/写/删除等）
+- **CommandTools**: 系统命令执行
+- **CronTool**: 定时任务管理
+- **SkillTools**: 技能系统扩展
+- **SpawnTool**: 子进程生成
 
-## Project Structure
+---
 
-```
-roxy/
-├── src/
-│   ├── agent/
-│   │   ├── loop.ts         # AgentLoop - event-driven message processor
-│   │   ├── context.ts      # Context management
-│   │   ├── factory.ts      # AgentFactory - creates/manages agents
-│   │   ├── memory.ts       # Memory management
-│   │   ├── skill.ts        # Skill system
-│   │   └── types.ts        # Agent type definitions
-│   ├── bus/
-│   │   ├── instance.ts     # EventBus - event hub implementation
-│   │   ├── events.ts       # Event type definitions
-│   │   └── types.ts        # Legacy types (deprecated)
-│   ├── channels/
-│   │   ├── base.ts         # Channel abstract base class
-│   │   ├── cli.channel.ts  # CLI channel implementation
-│   │   └── web.channel.ts  # Web channel implementation
-│   ├── cli/
-│   │   └── commands/
-│   │       ├── agent.ts    # agent command
-│   │       ├── onboard.ts  # onboard command
-│   │       └── web.ts      # web command
-│   ├── config/
-│   │   └── manager.ts      # Configuration management
-│   ├── orchestrator/
-│   │   └── orchestrator.ts # AgentOrchestrator - task routing
-│   ├── provider/
-│   │   ├── base.ts         # LLM provider base class
-│   │   └── llm.ts          # LiteLLM provider implementation
-│   ├── session/
-│   │   └── manager.ts      # Session management and persistence
-│   ├── tools/              # Tool system
-│   ├── skills/             # Skill system
-│   ├── web/
-│   │   └── server.ts       # Web server
-│   ├── types/
-│   │   └── errors.ts       # Error type definitions
-│   └── utils/              # Utility functions
-├── tests/
-├── package.json
-├── tsconfig.json
-├── tsdown.config.ts
-└── README.md
-```
+## 构建和运行
 
-## Core Components
+### 安装依赖
 
-### EventBus (`src/bus/`)
-
-**Event-Driven Communication**:
-```typescript
-class EventBus {
-  // Publish event
-  emit<K extends keyof EventMap>(event: K, data: EventMap[K]): void
-  
-  // Subscribe to event
-  on<K extends keyof EventMap>(event: K, handler: Handler<EventMap[K]>): void
-  
-  // Convenience methods
-  publishUserMessage(data: Omit<EventMap['user:message'], 'timestamp'>): void
-  publishAgentResponse(data: Omit<EventMap['agent:response'], 'timestamp'>): void
-  publishAgentStream(data: Omit<EventMap['agent:stream'], 'timestamp'>): void
-  publishAgentToolCall(data: Omit<EventMap['agent:tool_call'], 'timestamp'>): void
-  publishAgentTaskComplete(data: Omit<EventMap['agent:task:complete'], 'timestamp'>): void
-}
-```
-
-**Event Types** (`src/bus/events.ts`):
-```typescript
-interface EventMap {
-  'user:message': UserMessageEvent
-  'agent:response': AgentResponseEvent
-  'agent:stream': AgentStreamEvent
-  'agent:tool_call': AgentToolCallEvent
-  'agent:tool_result': AgentToolResultEvent
-  'agent:execute': AgentExecuteEvent
-  'agent:task:complete': AgentTaskCompleteEvent
-  'agent:delegate': AgentDelegateEvent
-  'team:broadcast': TeamBroadcastEvent
-  'session:save': SessionSaveEvent
-  'error': ErrorEvent
-}
-```
-
-### Channel Layer (`src/channels/`)
-
-**BaseChannel** - Simplified abstract base class:
-```typescript
-abstract class BaseChannel {
-  abstract readonly id: string
-  protected sessionId: string | null
-  protected eventBus: EventBus
-
-  abstract start(): Promise<void>
-  abstract stop(): Promise<void>
-  abstract display(msg: any): Promise<void>
-
-  protected async handleInput(content: string): Promise<void> {
-    this.eventBus.publishUserMessage({
-      channelId: this.id,
-      sessionId: this.sessionId!,
-      content,
-    })
-  }
-}
-```
-
-**CLIChannel** - CLI channel implementation:
-- Uses `readline` for user input
-- Uses `chalk` and `ora` for styled output
-- Subscribes to events for display
-- Supports commands: `/help`, `/clear`, `/history`, `/skills`, `/exit`
-- Default sessionId: `cli:default`
-
-**WebChannel** - Web channel implementation:
-- Uses WebSocket for communication
-- One Channel instance per connection
-- Subscribes to events for display
-- Default sessionId: `web:{random ID}`
-
-### AgentLoop (`src/agent/loop.ts`)
-
-**Event-Driven Message Processor**:
-```typescript
-class AgentLoop {
-  constructor(deps: AgentLoopDeps) {
-    // Subscribe to agent:execute events
-    this.setupEventHandlers()
-  }
-
-  private async executeTask(task: AgentTask): Promise<void> {
-    // 1. Get session
-    this.session = await this.getOrCreateSession(task.sessionId)
-    
-    // 2. Add user message
-    this.session.addMessage('user', task.content)
-    
-    // 3. Call LLM API
-    const result = await this.provider.chat({ ... })
-    
-    // 4. Handle tool calls
-    if (toolCalls) {
-      this.eventBus.publishAgentToolCall({ ... })
-      const results = await this.toolExecutor.executeTools(toolCalls)
-      this.eventBus.publishAgentToolResult({ ... })
-    }
-    
-    // 5. Publish response
-    this.eventBus.publishAgentResponse({ ... })
-  }
-}
-```
-
-### AgentFactory (`src/agent/factory.ts`)
-
-**Agent Creation and Management**:
-```typescript
-class AgentFactory {
-  async createAgent(config: AgentConfig): Promise<AgentLoop> {
-    const agent = new AgentLoop({ ... })
-    
-    // Subscribe to execution events for this agent
-    this.eventBus.on('agent:execute', async (event) => {
-      if (event.task.agentId === config.id) {
-        await this.handleTaskExecution(agent, event.task)
-      }
-    })
-    
-    this.agents.set(config.id, agent)
-    return agent
-  }
-
-  async createSubAgent(parentId: string, specialty: string): Promise<AgentLoop> {
-    const subAgentId = `sub-${specialty}-${uuidv4().slice(0, 8)}`
-    return this.createAgent({ id: subAgentId, role: AgentRole.SUB })
-  }
-}
-```
-
-### AgentOrchestrator (`src/orchestrator/orchestrator.ts`)
-
-**Task Routing and Team Management**:
-```typescript
-class AgentOrchestrator {
-  private async handleUserMessage(event: UserMessageEvent) {
-    // Route to appropriate agent
-    const agentId = await this.selectAgent(event.content)
-    
-    // Create task
-    const task: AgentTask = {
-      id: uuidv4(),
-      agentId,
-      content: event.content,
-      sessionId: event.sessionId,
-      channelId: event.channelId,
-      status: TaskStatus.PENDING,
-    }
-    
-    // Publish execution event
-    this.eventBus.publishAgentExecute({ task })
-  }
-
-  async createTeam(team: AgentTeam): Promise<void> {
-    // Create team members
-    for (const member of team.members) {
-      await this.agentFactory.createAgent({
-        id: member.agentId,
-        role: AgentRole.SUB,
-      })
-    }
-    this.teams.set(team.id, team)
-  }
-}
-```
-
-### SessionManager (`src/session/manager.ts`)
-
-**Event-Driven Auto-Save**:
-```typescript
-class SessionManager {
-  setEventBus(eventBus: EventBus): void {
-    this.eventBus = eventBus
-    this.setupEventHandlers()
-  }
-
-  private setupEventHandlers(): void {
-    // Auto-save on user message
-    this.eventBus.on('user:message', (event) => {
-      this.appendMessage(event.sessionId, 'user', event.content)
-    })
-
-    // Auto-save on agent response
-    this.eventBus.on('agent:response', (event) => {
-      this.appendMessage(event.sessionId, 'assistant', event.content)
-      this.save(event.sessionId) // Auto-persist
-    })
-
-    // Auto-save on tool result
-    this.eventBus.on('agent:tool_result', (event) => {
-      this.appendToolMessage(event.sessionId, event.toolResult, event.toolCallId)
-      this.save(event.sessionId) // Auto-persist
-    })
-  }
-}
-```
-
-**Session Isolation Strategy**:
-```
-CLI Default: sessionId = 'cli:default'     → cli_default.jsonl
-CLI Work:    sessionId = 'cli:work'        → cli_work.jsonl
-Web User A:  sessionId = 'web:userA'       → web_userA.jsonl
-Web User B:  sessionId = 'web:userB'       → web_userB.jsonl
-Shared:      sessionId = 'shared:proj1'    → shared_proj1.jsonl (CLI & Web shared)
-```
-
-## Building and Running
-
-### Install Dependencies
 ```bash
 pnpm install
 ```
 
-### Build Project
-```bash
-pnpm build
-```
+### 开发
 
-### Run Tests
 ```bash
-pnpm test
-```
-
-### Development Mode
-```bash
+# 使用 ts-node 直接运行（开发模式）
 pnpm dev
+
+# 构建项目
+pnpm build
+
+# 运行 Web 服务器
+pnpm web
 ```
 
-### Lint and Format
+### 测试
+
 ```bash
-pnpm lint      # Run oxlint
-pnpm lint:fix  # Fix lint issues
-pnpm fmt       # Format with oxfmt
+# 运行所有测试
+pnpm test
+
+# 运行测试 UI
+pnpm test:ui
+
+# 监视模式运行测试
+pnpm test:watch
 ```
 
-### Global Install and Usage
+### 代码质量
+
 ```bash
-# Install globally
-pnpm add -g roxy
+# Lint 检查
+pnpm lint
 
-# Initialize configuration
-roxy onboard
+# 自动修复 lint 问题
+pnpm lint:fix
 
-# Start CLI session
-roxy agent
-roxy agent --session cli:work  # Specify session
-
-# Start Web server
-roxy web -p 3000
+# 格式化代码
+pnpm fmt
 ```
 
-## Configuration
+### 构建产物
 
-Configuration file location: `~/.roxy/config.json`
+构建后输出到 `dist/` 目录：
+
+- `dist/index.js` - 主入口
+- `dist/cli/index.mjs` - CLI 可执行文件
+- `dist/agent/loop.mjs` - Agent Loop 模块
+- `dist/provider/llm.mjs` - LLM Provider 模块
+- 等等...
+
+---
+
+## 开发规范
+
+### 项目结构
+
+```
+roxy/
+├── src/
+│   ├── agent/          # Agent 核心逻辑
+│   ├── bus/            # 事件总线
+│   ├── channels/       # 通信渠道
+│   ├── cli/            # CLI 命令
+│   ├── config/         # 配置管理
+│   ├── cron/           # 定时任务
+│   ├── gateway/        # 网关层
+│   ├── provider/       # LLM 提供商
+│   ├── session/        # 会话管理
+│   ├── skills/         # 技能系统
+│   ├── tools/          # 工具实现
+│   ├── types/          # TypeScript 类型定义
+│   └── utils/          # 工具函数
+├── tests/              # 测试文件
+├── .roxy/              # 运行时数据
+│   ├── config.json     # 用户配置
+│   ├── sessions/       # 会话存储
+│   └── workspace/      # 工作区文件
+└── dist/               # 构建输出
+```
+
+### 编码风格
+
+- **模块系统**: ES Modules (`"type": "module"`)
+- **目标环境**: ES2020
+- **模块解析**: `bundler` 模式
+- **错误处理**: 使用 `RoxyError` 统一错误类型
+- **日志**: 使用 `log`/`logError` 工具函数
+
+### 事件命名约定
+
+事件总线使用 `namespace:action` 格式：
+
+- `agent:execute` - 执行任务
+- `agent:response` - 响应返回
+- `agent:stream` - 流式数据
+- `agent:tool_call` - 工具调用
+- `agent:tool_result` - 工具结果
+- `subagent:complete` - 子代理完成
+- `error` - 错误事件
+
+### 测试实践
+
+- 测试文件位于 `tests/` 目录
+- 使用 Vitest 框架
+- 测试文件命名：`*.test.ts`
+- 测试工具调用相关的功能时使用 mock
+
+### 配置管理
+
+配置文件位于 `~/.roxy/config.json`：
 
 ```json
 {
-  "workspace": "/home/user/.roxy/workspace",
+  "workspace": "~/.roxy/workspace",
   "agents": {
     "defaults": {
       "model": "ollama/qwen3.5:9b"
     }
   },
   "providers": {
+    "deepseek": {
+      "apiKey": "",
+      "baseURL": "https://api.deepseek.com"
+    },
     "ollama": {
       "apiKey": "ollama-local",
       "baseURL": "http://localhost:11434/v1"
-    },
-    "deepseek": {
-      "apiKey": "your-api-key-here",
-      "baseURL": "https://api.deepseek.com"
     }
   }
 }
 ```
 
-## Development Conventions
+### 工作区文件
 
-### Type Safety
-- TypeScript throughout the codebase
-- All events have type definitions in `src/bus/events.ts`
-- Agent types in `src/agent/types.ts`
+初始化后，`~/.roxy/workspace/` 包含：
 
-### Error Handling
-- Unified `RoxyError` class with error codes
-- Error categorization: Network, Config, Session, Tool, LLM, System
-- Recoverable vs Fatal error distinction
-- Centralized logging via `src/utils/error-handler.ts`
+- `AGENT.md` - Agent 行为指南
+- `SOUL.md` - AI 人格定义
+- `USER.md` - 用户偏好设置
+- `MEMORY.md` - 重要信息存储
+- `HISTORY.md` - 追加式事件日志
 
-### Code Style
-- ES2020+ features
-- Modern TypeScript best practices
-- Modular design for extensibility
+---
 
-### Testing Practices
-- Vitest for unit testing
-- Tests located in `tests/` directory
-- Test files named `*.test.ts`
+## 关键设计决策
 
-## Extensibility
-
-### Adding a New Channel
-
-1. Extend `BaseChannel` class
-2. Implement `start()`, `stop()`, `display()` methods
-3. Subscribe to events in `start()`
-
-```typescript
-class DiscordChannel extends BaseChannel {
-  readonly id = 'discord'
-  
-  async start() {
-    this.subscribeEvents()
-    // Setup Discord bot...
-  }
-  
-  async display(msg: any) {
-    // Send to Discord...
-  }
-}
-```
-
-### Adding New Event Types
-
-1. Add type definition in `src/bus/events.ts`
-2. Add to `EventMap` interface
-3. Add convenience method in `EventBus`
-
-### Adding New Agent Types
-
-1. Create agent config with unique `id` and `role`
-2. Use `AgentFactory.createAgent(config)`
-3. Agent automatically subscribes to `agent:execute` events
-
-### Adding SubAgent Support
-
-```typescript
-// In your agent's logic
-this.eventBus.publishAgentDelegate({
-  parentId: task.id,
-  parentAgentId: this.config.id,
-  delegation: {
-    parentId: task.id,
-    subTask: 'Review this code',
-    agentType: 'code-reviewer',
-  },
-})
-```
-
-### Creating Agent Teams
-
-```typescript
-const codeReviewTeam: AgentTeam = {
-  id: 'code-review-team',
-  name: 'Code Review Team',
-  lead: 'senior-dev',
-  members: [
-    { agentId: 'security-expert', role: 'security_review' },
-    { agentId: 'performance-expert', role: 'perf_review' },
-    { agentId: 'style-expert', role: 'style_review' },
-  ],
-}
-
-await orchestrator.createTeam(codeReviewTeam)
-```
-
-## Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `commander` | CLI command framework |
-| `chalk` | Terminal styling |
-| `ora` | Loading spinners |
-| `ws` | WebSocket server |
-| `mitt` | Event emitter (EventBus foundation) |
-| `uuid` | Unique ID generation |
-
-## Dev Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `tsdown` | Build tool |
-| `typescript` | Type checking |
-| `vitest` | Testing framework |
-| `oxlint` | Linting |
-| `oxfmt` | Formatting |
-
-## Event Flow Example
-
-```
-1. User types "Hello" in CLI
-   → CLIChannel.handleInput()
-   → eventBus.publishUserMessage({ sessionId: 'cli:default', content: 'Hello' })
-
-2. AgentOrchestrator receives event
-   → selectAgent() → 'main-agent'
-   → Create task
-   → eventBus.publishAgentExecute({ task })
-
-3. AgentLoop (main-agent) receives event
-   → executeTask(task)
-   → Get session from SessionManager
-   → Call LLM API
-   → eventBus.publishAgentStream({ chunk: 'H' })
-   → eventBus.publishAgentStream({ chunk: 'i' })
-   → eventBus.publishAgentResponse({ content: 'Hi!' })
-
-4. SessionManager receives events
-   → On 'user:message': append user message
-   → On 'agent:response': append assistant message + save()
-
-5. CLIChannel receives events
-   → On 'agent:stream': showStream(chunk)
-   → On 'agent:response': showResponse(content)
-```
+1. **事件驱动架构**: 使用事件总线解耦各模块，支持异步和并发处理
+2. **工具显式注册**: 工具不自动扫描，由 Gateway 显式注册，增强可控性
+3. **统一错误处理**: 使用 `RoxyError` 封装所有错误，便于分类和处理
+4. **会话持久化**: 所有对话和工具调用结果保存到 session，支持上下文恢复
+5. **流式响应**: 支持 LLM 流式输出，实时反馈给用户
