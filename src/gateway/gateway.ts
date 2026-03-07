@@ -1,4 +1,4 @@
-import { EventBus } from '../bus/instance'
+import { Bus, getBus } from '../bus/instance'
 import { SessionManager } from '../session/manager'
 import { ToolExecutor } from '../tools/ToolExecutor'
 import { AgentLoop } from '../agent/loop'
@@ -29,7 +29,7 @@ import { loadConfig } from '../config/manager'
  */
 export class RoxyGateway {
   // 核心组件
-  private readonly eventBus: EventBus
+  private readonly bus: Bus
   private readonly sessionManager: SessionManager
   private readonly toolExecutor: ToolExecutor
   private provider: LiteLLMProvider | null = null
@@ -51,8 +51,8 @@ export class RoxyGateway {
   constructor(deps: GatewayDeps) {
     this.config = deps.config
 
-    // 1. 创建 EventBus (纯粹的事件总线)
-    this.eventBus = new EventBus()
+    // 1. 创建 Bus (纯粹的事件总线)
+    this.bus = getBus()
 
     // 2. 创建 SessionManager
     this.sessionManager = new SessionManager(deps.config.sessionDir)
@@ -68,11 +68,8 @@ export class RoxyGateway {
    * 设置事件订阅
    */
   private setupEventSubscriptions(): void {
-    // SessionManager 订阅事件实现自动保存
-    this.sessionManager.setEventBus(this.eventBus)
-
     // Gateway 订阅所有输出事件，分发给注册的处理器
-    this.eventBus.on('agent:response', (event) => {
+    this.bus.on('agent:response', (event) => {
       this.dispatchOutput({
         type: 'response',
         channelId: event.channelId,
@@ -81,7 +78,7 @@ export class RoxyGateway {
       })
     })
 
-    this.eventBus.on('agent:stream', (event) => {
+    this.bus.on('agent:stream', (event) => {
       this.dispatchOutput({
         type: 'stream',
         channelId: event.channelId,
@@ -90,7 +87,7 @@ export class RoxyGateway {
       })
     })
 
-    this.eventBus.on('agent:tool_call', (event) => {
+    this.bus.on('agent:tool_call', (event) => {
       this.dispatchOutput({
         type: 'tool_call',
         channelId: event.channelId,
@@ -99,7 +96,7 @@ export class RoxyGateway {
       })
     })
 
-    this.eventBus.on('agent:tool_result', (event) => {
+    this.bus.on('agent:tool_result', (event) => {
       this.dispatchOutput({
         type: 'tool_result',
         channelId: event.channelId,
@@ -108,7 +105,7 @@ export class RoxyGateway {
       })
     })
 
-    this.eventBus.on('error', (event) => {
+    this.bus.on('error', (event) => {
       this.dispatchOutput({
         type: 'error',
         channelId: event.channelId || 'unknown',
@@ -118,7 +115,7 @@ export class RoxyGateway {
     })
 
     // 监听 SubAgent 事件
-    this.eventBus.on('subagent:start', (event) => {
+    this.bus.on('subagent:start', (event) => {
       this.dispatchOutput({
         type: 'subagent_start',
         channelId: event.parentChannelId,
@@ -131,7 +128,7 @@ export class RoxyGateway {
       })
     })
 
-    this.eventBus.on('subagent:complete', (event) => {
+    this.bus.on('subagent:complete', (event) => {
       this.dispatchOutput({
         type: 'subagent_complete',
         channelId: event.parentChannelId,
@@ -147,7 +144,7 @@ export class RoxyGateway {
     })
 
     // 监听用户消息，路由到 Agent
-    this.eventBus.on('user:message', async (event) => {
+    this.bus.on('user:message', async (event) => {
       await this.handleUserMessage(event)
     })
   }
@@ -180,7 +177,7 @@ export class RoxyGateway {
       await this.registerContextualTools(channelId, sessionId)
 
       // 发布任务执行事件
-      this.eventBus.publishAgentExecute({ task })
+      this.bus.emit('agent:execute', { task })
     } catch (error) {
       logError(
         error instanceof RoxyError
@@ -195,7 +192,7 @@ export class RoxyGateway {
       )
 
       // 发布错误事件
-      this.eventBus.publishError({
+      this.bus.emit('error', {
         channelId,
         sessionId,
         error,
@@ -242,11 +239,12 @@ export class RoxyGateway {
   async receive(input: GatewayInput): Promise<void> {
     log('debug', `Gateway received message from ${input.channelId}`, 'RoxyGateway')
 
-    // 发布用户消息事件到 EventBus
-    this.eventBus.publishUserMessage({
+    // 发布用户消息事件到 Bus
+    this.bus.emit('user:message', {
       channelId: input.channelId,
       sessionId: input.sessionId,
       content: input.content,
+      timestamp: new Date(),
     })
   }
 
@@ -315,21 +313,42 @@ export class RoxyGateway {
     const { createSpawnTools } = await import('../tools/SpawnTool')
     const { SubAgentManager } = await import('../agent/subAgent')
 
-    // 创建 CronTool（需要 EventBus）
+    // 创建 CronTool（需要 Bus）
     const cronTools = createCronTools({
       sessionId,
       channelId,
       workspace: this.config.workspace,
-      eventBus: this.eventBus,
+      bus: this.bus,
     })
 
-    // 创建 SubAgentManager 和 SpawnTool
+    // 创建 SubAgentManager 和 SpawnTool（通过回调发布事件）
     const subAgentManager = new SubAgentManager({
       provider: this.provider,
-      eventBus: this.eventBus,
       sessionManager: this.sessionManager,
       toolExecutor: this.toolExecutor,
       workspace: this.config.workspace,
+    }, {
+      onSubAgentStart: (task) => {
+        this.bus.emit('subagent:start', {
+          taskId: task.id,
+          label: task.label,
+          task: task.task,
+          parentChannelId: task.parentChannelId,
+          parentSessionId: task.parentSessionId,
+        })
+      },
+      onSubAgentComplete: (task, success) => {
+        this.bus.emit('subagent:complete', {
+          taskId: task.id,
+          label: task.label,
+          parentChannelId: task.parentChannelId,
+          parentSessionId: task.parentSessionId,
+          result: task.result || '',
+          success,
+          error: task.error,
+          timestamp: new Date(),
+        })
+      },
     })
 
     const spawnTools = createSpawnTools(subAgentManager, {
@@ -395,7 +414,7 @@ export class RoxyGateway {
       config,
       provider: this.provider,
       toolExecutor: this.toolExecutor,
-      eventBus: this.eventBus,
+      bus: this.bus,
       context: ctx,
       sessionManager: this.sessionManager,
     })
@@ -481,10 +500,10 @@ export class RoxyGateway {
   }
 
   /**
-   * 获取 EventBus 实例 (仅供内部使用)
+   * 获取 Bus 实例 (仅供内部使用)
    */
-  getEventBus(): EventBus {
-    return this.eventBus
+  getBus(): Bus {
+    return this.bus
   }
 
   /**

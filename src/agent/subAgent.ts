@@ -9,7 +9,6 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { LiteLLMProvider } from '../provider/llm'
-import type { EventBus } from '../bus/instance'
 import type { SessionManager } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 import { log, logError } from '../utils/error-handler'
@@ -46,11 +45,15 @@ export interface SubAgentConfig {
 
 export interface SubAgentManagerDeps {
   provider: LiteLLMProvider
-  eventBus: EventBus
   sessionManager: SessionManager
   toolExecutor: ToolExecutor
   config?: SubAgentConfig
   workspace: string
+}
+
+export interface SubAgentCallbacks {
+  onSubAgentStart?: (task: SubAgentTask) => void
+  onSubAgentComplete?: (task: SubAgentTask, success: boolean) => void
 }
 
 export class SubAgentManager {
@@ -59,23 +62,23 @@ export class SubAgentManager {
   private static readonly DEFAULT_MAX_TOKENS = 4096
 
   private provider: LiteLLMProvider
-  private eventBus: EventBus
   private sessionManager: SessionManager
   private toolExecutor: ToolExecutor
   private workspace: string
   private config: Required<SubAgentConfig>
+  private callbacks: SubAgentCallbacks
 
   // 运行中的任务
   private runningTasks: Map<string, Promise<void>> = new Map()
   // 会话 -> 任务 ID 映射
   private sessionTasks: Map<string, Set<string>> = new Map()
 
-  constructor(deps: SubAgentManagerDeps) {
+  constructor(deps: SubAgentManagerDeps, callbacks?: SubAgentCallbacks) {
     this.provider = deps.provider
-    this.eventBus = deps.eventBus
     this.sessionManager = deps.sessionManager
     this.toolExecutor = deps.toolExecutor
     this.workspace = deps.workspace
+    this.callbacks = callbacks || {}
 
     // 合并默认配置
     this.config = {
@@ -150,14 +153,8 @@ export class SubAgentManager {
 
     log('debug', `Spawned subagent [${taskId}]: ${displayLabel}`, 'SubAgentManager')
 
-    // 发布 SubAgent 开始事件
-    this.eventBus.publishSubAgentStart({
-      taskId,
-      label: displayLabel,
-      task,
-      parentChannelId,
-      parentSessionId,
-    })
+    // 通过回调通知，而非直接发布事件
+    this.callbacks.onSubAgentStart?.(subAgentTask)
 
     return `Subagent [${displayLabel}] started (id: ${taskId}). I'll notify you when it completes.`
   }
@@ -315,29 +312,12 @@ ${this.workspace}
    * 通知主 Agent 任务结果
    */
   private async announceResult(task: SubAgentTask, status: 'ok' | 'error'): Promise<void> {
-    const statusText = status === 'ok' ? 'completed successfully' : 'failed'
-
-    const announceContent = `[Subagent '${task.label}' ${statusText}]
-
-Task: ${task.task}
-
-Result:
-${task.result || task.error}`
-
-    // 发布 SubAgent 完成事件
-    this.eventBus.publishSubAgentComplete({
-      taskId: task.id,
-      label: task.label,
-      parentChannelId: task.parentChannelId,
-      parentSessionId: task.parentSessionId,
-      result: announceContent,
-      success: status === 'ok',
-      error: status === 'error' ? task.error : undefined,
-    })
+    // 通过回调通知，而非直接发布事件
+    this.callbacks.onSubAgentComplete?.(task, status === 'ok')
 
     log(
       'debug',
-      `Subagent [${task.id}] announced result to ${task.parentChannelId}`,
+      `Subagent [${task.id}] announced result via callback`,
       'SubAgentManager',
     )
   }

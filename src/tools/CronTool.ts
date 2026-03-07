@@ -1,5 +1,5 @@
-import { CronService, CronJobType } from '../cron/CronService'
-import { EventBus } from '../bus/instance'
+import { CronService, CronJobType, type CronCallbacks } from '../cron/CronService'
+import type { Bus } from '../bus/instance'
 
 /**
  * CronTool 执行上下文
@@ -8,14 +8,26 @@ export interface CronContext {
   sessionId: string
   channelId: string
   workspace: string
-  eventBus: EventBus
+  bus: Bus
 }
 
 /**
  * 创建 CronTool 实例（工厂函数）
  */
 export function createCronTools(context: CronContext) {
-  const cronService = new CronService(context.workspace, context.eventBus)
+  // 创建回调：通过 Gateway 发布 user:message 事件
+  const callbacks: CronCallbacks = {
+    onTrigger: (sessionId, channelId, content) => {
+      context.bus.emit('user:message', {
+        channelId,
+        sessionId,
+        content,
+        timestamp: new Date(),
+      })
+    },
+  }
+
+  const cronService = new CronService(context.workspace, callbacks)
 
   return [
     {

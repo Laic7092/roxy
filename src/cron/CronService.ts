@@ -1,7 +1,7 @@
 import { CronJob } from 'cron'
 import { v4 as uuidv4 } from 'uuid'
-import { EventBus } from '../bus/instance'
 import { log, logError } from '../utils/error-handler'
+import { RoxyError, ErrorCode } from '../types/errors'
 
 /**
  * Cron job types
@@ -49,18 +49,22 @@ export interface CronJobDefinition {
   createdAt: Date
 }
 
+export interface CronCallbacks {
+  onTrigger?: (sessionId: string, channelId: string, content: string) => void
+}
+
 /**
  * Cron service for scheduling reminders and recurring tasks
  */
 export class CronService {
   private jobs: Map<string, CronJobDefinition> = new Map()
   private cronJobs: Map<string, CronJob> = new Map()
-  private eventBus: EventBus
   private workspace: string
+  private callbacks: CronCallbacks
 
-  constructor(workspace: string, eventBus: EventBus) {
+  constructor(workspace: string, callbacks?: CronCallbacks) {
     this.workspace = workspace
-    this.eventBus = eventBus
+    this.callbacks = callbacks || {}
   }
 
   /**
@@ -144,16 +148,13 @@ export class CronService {
           }
         }
 
-        // Execute based on job type
-        // Both REMINDER and TASK types publish user:message to trigger proper agent flow
-        // This ensures session consistency and proper event handling
+        // Execute based on job type - 通过回调触发，而非直接发布事件
         if (job.type === CronJobType.REMINDER || job.type === CronJobType.TASK) {
           const prefix = job.type === CronJobType.REMINDER ? '⏰ Reminder: ' : '[Scheduled Task] '
-          this.eventBus.publishUserMessage({
-            channelId: job.channelId,
-            sessionId: job.sessionId,
-            content: `${prefix}${job.message}`,
-          })
+          const content = `${prefix}${job.message}`
+          
+          // 通过回调通知 Gateway 发布事件
+          this.callbacks.onTrigger?.(job.sessionId, job.channelId, content)
         }
 
         // Auto-delete one-time jobs

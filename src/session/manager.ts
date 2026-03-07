@@ -2,7 +2,6 @@ import { readFile, writeFile, mkdir, unlink, copyFile } from 'fs/promises'
 import { join } from 'path'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log } from '../utils/error-handler'
-import type { EventBus } from '../bus/instance'
 
 export interface Message {
   role: Role
@@ -82,52 +81,16 @@ export class Session {
  *
  * 职责：
  * - 加载/保存会话到磁盘
- * - 监听事件自动保存会话
+ * - 不提供事件订阅，由 Loop 调用
  */
 export class SessionManager {
   private dir: string
-  private eventBus: EventBus | null = null
 
   // 内存缓存
   private sessions: Map<string, Session> = new Map()
 
   constructor(sessionDir?: string) {
     this.dir = sessionDir || join(require('os').homedir(), '.roxy', 'sessions')
-  }
-
-  /**
-   * 设置 EventBus 并订阅事件
-   */
-  setEventBus(eventBus: EventBus): void {
-    this.eventBus = eventBus
-    this.setupEventHandlers()
-  }
-
-  /**
-   * 设置事件处理器
-   */
-  private setupEventHandlers(): void {
-    if (!this.eventBus) return
-
-    // 监听用户消息 - 获取或创建会话并添加消息
-    this.eventBus.on('user:message', async (event) => {
-      const session = await this.getOrCreate(event.sessionId)
-      session.addMessage('user', event.content)
-    })
-
-    // 监听 Agent 响应 - 添加消息并自动保存
-    this.eventBus.on('agent:response', async (event) => {
-      const session = await this.getOrCreate(event.sessionId)
-      session.addMessage('assistant', event.content, event.toolCalls)
-      await this.save(event.sessionId)
-    })
-
-    // 监听工具结果 - 添加消息并自动保存
-    this.eventBus.on('agent:tool_result', async (event) => {
-      const session = await this.getOrCreate(event.sessionId)
-      session.addMessage('tool', event.toolResult, event.toolCallId)
-      await this.save(event.sessionId)
-    })
   }
 
   private async ensureDir() {

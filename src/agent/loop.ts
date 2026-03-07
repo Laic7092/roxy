@@ -2,7 +2,7 @@ import type { LiteLLMProvider } from '../provider/llm'
 import type { ContextMng } from './context'
 import type { Session, SessionManager } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
-import type { EventBus } from '../bus/instance'
+import type { Bus } from '../bus/instance'
 import type { AgentConfig, AgentTask } from './types'
 import { TaskStatus } from './types'
 import { RoxyError, ErrorCode } from '../types/errors'
@@ -12,7 +12,7 @@ export interface AgentLoopDeps {
   config: AgentConfig
   provider: LiteLLMProvider
   toolExecutor: ToolExecutor
-  eventBus: EventBus
+  bus: Bus
   context: ContextMng
   sessionManager: SessionManager
 }
@@ -23,7 +23,7 @@ export interface AgentLoopDeps {
  * 职责：
  * - 监听 agent:execute 事件执行任务
  * - 处理 LLM 对话和工具调用
- * - 发布响应事件到 EventBus
+ * - 发布响应事件到 Bus
  */
 export class AgentLoop {
   // 配置常量
@@ -34,7 +34,7 @@ export class AgentLoop {
   private config: AgentConfig
   private provider: LiteLLMProvider
   private toolExecutor: ToolExecutor
-  private eventBus: EventBus
+  private bus: Bus
   private context: ContextMng
   private sessionManager: SessionManager
 
@@ -45,7 +45,7 @@ export class AgentLoop {
     this.config = deps.config
     this.provider = deps.provider
     this.toolExecutor = deps.toolExecutor
-    this.eventBus = deps.eventBus
+    this.bus = deps.bus
     this.context = deps.context
     this.sessionManager = deps.sessionManager
 
@@ -58,7 +58,7 @@ export class AgentLoop {
    */
   private setupEventHandlers(): void {
     // 监听 agent:execute 事件
-    this.eventBus.on('agent:execute', async (event) => {
+    this.bus.on('agent:execute', async (event) => {
       // 只处理分配给此 Agent 的任务
       if (event.task.agentId === this.config.id) {
         await this.executeTask(event.task)
@@ -66,7 +66,7 @@ export class AgentLoop {
     })
 
     // 监听 subagent:complete 事件
-    this.eventBus.on('subagent:complete', (event) => {
+    this.bus.on('subagent:complete', (event) => {
       // 只处理属于当前会话的结果
       if (this.session && event.parentSessionId === this.session.id) {
         this.handleSubAgentComplete(event)
@@ -105,6 +105,10 @@ export class AgentLoop {
 
       // 获取或创建会话
       this.session = await this.getOrCreateSession(task.sessionId)
+
+      // 添加用户消息并保存
+      this.session.addMessage('user', task.content)
+      await this.sessionManager.save(task.sessionId)
 
       // 构建上下文
       let contextMessages = await this.context.buildContext(this.session.messages)
@@ -151,16 +155,22 @@ export class AgentLoop {
           // 检查是否需要执行工具调用
           const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
 
+          // 添加助手消息到 session
+          this.session.addMessage('assistant', content || '', toolCalls)
 
-          this.eventBus.publishAgentResponse({
+          this.bus.emit('agent:response', {
             agentId: this.config.id,
             taskId: task.id,
             channelId: task.channelId,
             sessionId: task.sessionId,
             content: content,
             toolCalls,
+            timestamp: new Date(),
           })
           aiResponse = content
+
+          // 保存 session
+          await this.sessionManager.save(task.sessionId)
 
           if (toolCalls && toolCalls.length > 0) {
             hasToolCalls = true
@@ -169,7 +179,7 @@ export class AgentLoop {
             for (const toolCall of toolCalls) {
               try {
                 const args = JSON.parse(toolCall.function.arguments)
-                this.eventBus.publishAgentToolCall({
+                this.bus.emit('agent:tool_call', {
                   agentId: this.config.id,
                   taskId: task.id,
                   channelId: task.channelId,
@@ -177,6 +187,7 @@ export class AgentLoop {
                   toolName: toolCall.function.name,
                   toolArgs: args,
                   toolCallId: toolCall.id,
+                  timestamp: new Date(),
                 })
               } catch (e) {
                 const parseError = new RoxyError(
@@ -201,7 +212,7 @@ export class AgentLoop {
 
             // 发布工具结果事件
             for (const toolResult of toolResults) {
-              this.eventBus.publishAgentToolResult({
+              this.bus.emit('agent:tool_result', {
                 agentId: this.config.id,
                 taskId: task.id,
                 channelId: task.channelId,
@@ -209,7 +220,12 @@ export class AgentLoop {
                 toolName: toolResult.name,
                 toolResult: toolResult.result,
                 toolCallId: toolResult.tool_call_id,
+                timestamp: new Date(),
               })
+
+              // 添加工具结果到 session 并保存
+              this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
+              await this.sessionManager.save(task.sessionId)
             }
 
             // 重新构建上下文
@@ -270,7 +286,7 @@ export class AgentLoop {
       logError(roxyError, 'error', 'AgentLoop')
 
       // 发布错误事件
-      this.eventBus.publishError({
+      this.bus.emit('error', {
         agentId: this.config.id,
         taskId: task.id,
         sessionId: task.sessionId,
@@ -288,7 +304,7 @@ export class AgentLoop {
    * 处理流式数据
    */
   private handleStreamData(task: AgentTask, chunk: string): void {
-    this.eventBus.publishAgentStream({
+    this.bus.emit('agent:stream', {
       agentId: this.config.id,
       taskId: task.id,
       channelId: task.channelId,
