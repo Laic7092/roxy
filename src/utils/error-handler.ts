@@ -12,6 +12,63 @@ import { RoxyError, ErrorCode, isRecoverableError } from '../types/errors'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'success'
 
 /**
+ * 日志级别优先级 (数值越小越严重)
+ */
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+  success: 1,
+}
+
+/**
+ * 全局日志配置
+ */
+interface LogConfig {
+  minLevel: LogLevel
+  enabledContexts: Set<string> | null // null 表示启用所有上下文
+}
+
+const globalLogConfig: LogConfig = {
+  minLevel: 'info', // 默认显示 info 及以上级别
+  enabledContexts: null,
+}
+
+/**
+ * 设置全局日志级别
+ * @param level 最低日志级别
+ */
+export function setLogLevel(level: LogLevel): void {
+  globalLogConfig.minLevel = level
+}
+
+/**
+ * 设置启用的上下文 (模块)
+ * @param contexts 上下文列表，null 表示启用所有
+ */
+export function setLogContexts(contexts: string[] | null): void {
+  globalLogConfig.enabledContexts = contexts ? new Set(contexts) : null
+}
+
+/**
+ * 检查日志级别是否应该输出
+ */
+function shouldLog(level: LogLevel, context?: string): boolean {
+  // 检查日志级别
+  if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[globalLogConfig.minLevel]) {
+    return false
+  }
+
+  // 检查上下文过滤
+  if (globalLogConfig.enabledContexts && context && !globalLogConfig.enabledContexts.has(context)) {
+    return false
+  }
+
+  return true
+}
+
+/**
  * 日志条目结构
  */
 export interface LogEntry {
@@ -34,12 +91,9 @@ export function log(
   context?: string,
   metadata?: Record<string, any>,
 ): void {
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-    context,
-    metadata,
+  // 检查是否应该输出此日志
+  if (!shouldLog(level, context)) {
+    return
   }
 
   const prefix = getLevelPrefix(level)

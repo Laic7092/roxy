@@ -3,7 +3,7 @@ import { Memory } from './memory'
 import { SkillsLoader, SkillMeta } from './skill'
 import { join } from 'path'
 import type { Message, ToolMessage } from '../session/manager'
-import chalk from 'chalk'
+import { log } from '../utils/error-handler'
 
 export class ContextMng {
   private sysMsgPromise: Promise<Message[]>
@@ -25,7 +25,7 @@ export class ContextMng {
    */
   private onSkillsChanged(skills: SkillMeta[]): void {
     this.currentSkills = skills
-    console.log(chalk.green('\n📚 Skills updated!') + ` ${skills.length} skill(s) available.`)
+    log('success', `Skills updated! ${skills.length} skill(s) available.`, 'context')
     // 重新加载系统消息
     this.sysMsgPromise = this.loadSystemMessages()
   }
@@ -75,8 +75,7 @@ export class ContextMng {
         try {
           return await readFile(path, 'utf-8')
         } catch (error) {
-          console.error(error)
-          console.warn(`Warning: Could not read ${path}, skipping...`)
+          log('warn', `Could not read ${path}, skipping...`, 'context')
           return ''
         }
       }),

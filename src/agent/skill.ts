@@ -1,6 +1,7 @@
 import { readFile, readdir, access, watch } from 'fs/promises'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { log, logError } from '../utils/error-handler'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -69,7 +70,7 @@ export class SkillsLoader {
           for await (const { eventType, filename } of watcher) {
             // 只监听 SKILL.md 文件的变化
             if (filename && filename.endsWith('SKILL.md')) {
-              console.log(`[SkillsLoader] Skill file changed: ${filename}`)
+              log('info', `Skill file changed: ${filename}`, 'skill')
               // 清除缓存并重新加载
               this.clearCache()
               if (this.onChangeCallback) {
@@ -79,10 +80,18 @@ export class SkillsLoader {
             }
           }
         })().catch((error) => {
-          console.error(`[SkillsLoader] Watch error for ${dir}:`, error)
+          logError(
+            error instanceof Error ? error : new Error(String(error)),
+            'warn',
+            'skill',
+          )
         })
       } catch (error) {
-        console.error(`[SkillsLoader] Failed to watch ${dir}:`, error)
+        logError(
+          error instanceof Error ? error : new Error(String(error)),
+          'warn',
+          'skill',
+        )
       }
     }
   }

@@ -58,6 +58,8 @@ async function logCommandExecution(
   try {
     await appendFile(LOG_FILE_PATH, logEntry, { encoding: 'utf8' })
   } catch (logError) {
+    // 日志写入失败时不抛出错误，避免影响主流程
+    // eslint-disable-next-line no-console
     console.error('Failed to write command log:', logError)
   }
 }

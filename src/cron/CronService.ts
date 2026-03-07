@@ -1,7 +1,7 @@
 import { CronJob } from 'cron'
 import { v4 as uuidv4 } from 'uuid'
 import { EventBus } from '../bus/instance'
-import { createLogger, LogLevel } from '../utils/logger'
+import { log, logError } from '../utils/error-handler'
 
 /**
  * Cron job types
@@ -56,16 +56,11 @@ export class CronService {
   private jobs: Map<string, CronJobDefinition> = new Map()
   private cronJobs: Map<string, CronJob> = new Map()
   private eventBus: EventBus
-  private logger: ReturnType<typeof createLogger>
   private workspace: string
 
   constructor(workspace: string, eventBus: EventBus) {
     this.workspace = workspace
     this.eventBus = eventBus
-    this.logger = createLogger(workspace, {
-      logToConsole: true,
-      enabledLevels: [LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.SUCCESS],
-    })
   }
 
   /**
@@ -112,7 +107,7 @@ export class CronService {
     this.cronJobs.set(jobId, cronJob)
     this.jobs.set(jobId, job)
 
-    await this.logger.info(`Cron job created: ${jobId}`, {
+    log('info', `Cron job created: ${jobId}`, 'CronService', {
       type: job.type,
       message: job.message.substring(0, 50),
       cronExpr: job.cronExpr,
@@ -166,13 +161,17 @@ export class CronService {
           await this.removeJob(job.id)
         }
 
-        await this.logger.success(`Cron job executed: ${job.id}`, {
+        log('success', `Cron job executed: ${job.id}`, 'CronService', {
           executionCount: job.executionCount,
         })
       } catch (error) {
-        await this.logger.error(`Cron job execution failed: ${job.id}`, {
-          error: error instanceof Error ? error.message : String(error),
-        })
+        logError(
+          error instanceof Error
+            ? new RoxyError(ErrorCode.SYSTEM_ERROR, `Cron job execution failed: ${job.id}`, error)
+            : new RoxyError(ErrorCode.SYSTEM_ERROR, `Cron job execution failed: ${job.id}`),
+          'error',
+          'CronService',
+        )
       }
     }
 
@@ -226,7 +225,7 @@ export class CronService {
   async removeJob(jobId: string): Promise<boolean> {
     const job = this.jobs.get(jobId)
     if (!job) {
-      await this.logger.warn(`Cron job not found: ${jobId}`)
+      log('warn', `Cron job not found: ${jobId}`, 'CronService')
       return false
     }
 
@@ -240,7 +239,7 @@ export class CronService {
     // Remove job definition
     this.jobs.delete(jobId)
 
-    await this.logger.info(`Cron job removed: ${jobId}`)
+    log('info', `Cron job removed: ${jobId}`, 'CronService')
     return true
   }
 
@@ -270,7 +269,7 @@ export class CronService {
   async pauseJob(jobId: string): Promise<boolean> {
     const job = this.jobs.get(jobId)
     if (!job) {
-      await this.logger.warn(`Cron job not found: ${jobId}`)
+      log('warn', `Cron job not found: ${jobId}`, 'CronService')
       return false
     }
 
@@ -278,7 +277,7 @@ export class CronService {
     if (cronJob) {
       cronJob.stop()
       job.active = false
-      await this.logger.info(`Cron job paused: ${jobId}`)
+      log('info', `Cron job paused: ${jobId}`, 'CronService')
       return true
     }
 
@@ -291,7 +290,7 @@ export class CronService {
   async resumeJob(jobId: string): Promise<boolean> {
     const job = this.jobs.get(jobId)
     if (!job) {
-      await this.logger.warn(`Cron job not found: ${jobId}`)
+      log('warn', `Cron job not found: ${jobId}`, 'CronService')
       return false
     }
 
@@ -302,7 +301,7 @@ export class CronService {
         cronJob.start()
       }
       job.active = true
-      
+
       // Try to get next execution time if available
       try {
         if (typeof cronJob.nextDates === 'function') {
@@ -316,8 +315,8 @@ export class CronService {
       } catch (_e) {
         // Ignore if nextDates is not available
       }
-      
-      await this.logger.info(`Cron job resumed: ${jobId}`)
+
+      log('info', `Cron job resumed: ${jobId}`, 'CronService')
       return true
     }
 
@@ -366,7 +365,7 @@ export class CronService {
     this.cronJobs.clear()
     this.jobs.clear()
 
-    await this.logger.info('All cron jobs cleared')
+    log('info', 'All cron jobs cleared', 'CronService')
   }
 
   /**

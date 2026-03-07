@@ -3,7 +3,6 @@ import chalk from 'chalk'
 import ora, { type Ora } from 'ora'
 import { BaseChannel } from './base'
 import type { ChannelMessage } from './types'
-import { ResourceManager } from '../utils/resource-manager'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError } from '../utils/error-handler'
 
@@ -23,8 +22,6 @@ export class CLIChannel extends BaseChannel {
   private aiResponse = ''
   private isWaitingResponse = false
 
-  private resourceManager = new ResourceManager()
-
   constructor(sessionId?: string) {
     super()
     this.sessionId = sessionId || 'cli:default'
@@ -36,7 +33,6 @@ export class CLIChannel extends BaseChannel {
 
     try {
       this.setupReadline()
-      this.setupResourceCleanup()
       this.setupInterruptHandler()
       this.showPrompt()
     } catch (error) {
@@ -54,22 +50,15 @@ export class CLIChannel extends BaseChannel {
   }
 
   async stop(): Promise<void> {
-    try {
-      await this.resourceManager.cleanupAll()
-    } catch (error) {
-      logError(
-        error instanceof RoxyError
-          ? error
-          : new RoxyError(
-              ErrorCode.RESOURCE_CLEANUP_FAILED,
-              'Failed to cleanup CLI channel resources',
-              error instanceof Error ? error : undefined,
-            ),
-        'warn',
-        'CLIChannel',
-      )
-    } finally {
+    // 清理 readline
+    if (this.rl) {
+      this.rl.close()
       this.rl = null
+    }
+
+    // 清理 spinner
+    if (this.spinner?.isSpinning) {
+      this.spinner.stop()
       this.spinner = null
     }
   }
@@ -118,16 +107,6 @@ export class CLIChannel extends BaseChannel {
     this.rl.on('close', () => {
       console.log(chalk.blue('\n👋 Goodbye!\n'))
       process.exit(0)
-    })
-  }
-
-  private setupResourceCleanup(): void {
-    this.resourceManager.register('readline', async () => {
-      if (this.rl) this.rl.close()
-    })
-
-    this.resourceManager.register('spinner', async () => {
-      if (this.spinner?.isSpinning) this.spinner.stop()
     })
   }
 

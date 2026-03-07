@@ -2,7 +2,8 @@ import { writeFile, mkdir, readFile, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { constants } from 'node:fs'
-import chalk from 'chalk'
+import { log, logError } from '../utils/error-handler'
+import { RoxyError, ErrorCode } from '../types/errors'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
@@ -55,7 +56,7 @@ async function initConfigFile(force: boolean): Promise<void> {
   }
 
   await writeFile(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2))
-  console.log(chalk.green('✓') + ` Config: ${CONFIG_PATH}`)
+  log('success', `Config: ${CONFIG_PATH}`, 'config/manager')
 }
 
 async function initWorkspaceFiles(): Promise<void> {
@@ -148,7 +149,7 @@ ${new Date().toISOString().split('T')[0]} - Workspace initialized
     }
 
     await writeFile(filePath, file.content, 'utf-8')
-    console.log(chalk.green('✓') + ` Workspace: ${file.name}`)
+    log('success', `Workspace: ${file.name}`, 'config/manager')
   }
 }
 
@@ -180,36 +181,6 @@ export async function checkPathPermissions(path: string): Promise<boolean> {
   }
 }
 
-// 日志级别枚举
-export enum LogLevel {
-  INFO = 'info',
-  WARN = 'warn',
-  ERROR = 'error',
-  SUCCESS = 'success',
-}
-
-/**
- * 统一日志记录函数
- */
-export function logMessage(level: LogLevel, message: string, ...args: any[]): void {
-  switch (level) {
-    case LogLevel.INFO:
-      console.log(chalk.blue(`ℹ️  ${message}`), ...args)
-      break
-    case LogLevel.WARN:
-      console.log(chalk.yellow(`⚠️  ${message}`), ...args)
-      break
-    case LogLevel.ERROR:
-      console.log(chalk.red(`❌ ${message}`), ...args)
-      break
-    case LogLevel.SUCCESS:
-      console.log(chalk.green(`✅ ${message}`), ...args)
-      break
-    default:
-      console.log(message, ...args)
-  }
-}
-
 /**
  * @deprecated Use initAll instead
  */
@@ -224,13 +195,17 @@ export async function loadConfig(): Promise<Config> {
     return JSON.parse(data)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.log(chalk.yellow(`⚠️  配置文件不存在：${CONFIG_PATH}，正在初始化...`))
+      log('warn', `配置文件不存在：${CONFIG_PATH}，正在初始化...`, 'config/manager')
       await ensureConfigAndWorkspace()
       const data = await readFile(CONFIG_PATH, 'utf-8')
       return JSON.parse(data)
     } else if (error instanceof SyntaxError) {
-      console.log(chalk.red(`❌ 配置文件格式错误：${error.message}`))
-      console.log(chalk.yellow(`⚠️  正在重新创建配置文件...`))
+      logError(
+        new RoxyError(ErrorCode.CONFIG_INVALID, `配置文件格式错误：${error.message}`),
+        'warn',
+        'config/manager',
+      )
+      log('warn', '正在重新创建配置文件...', 'config/manager')
       await initAll(true)
       const data = await readFile(CONFIG_PATH, 'utf-8')
       return JSON.parse(data)
