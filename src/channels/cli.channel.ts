@@ -2,8 +2,7 @@ import readline from 'readline'
 import chalk from 'chalk'
 import ora, { type Ora } from 'ora'
 import { BaseChannel } from './base'
-import type { EventBus } from '../bus/instance'
-import type { Session, SessionManager } from '../session/manager'
+import type { ChannelMessage } from './types'
 import { ResourceManager } from '../utils/resource-manager'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError } from '../utils/error-handler'
@@ -11,7 +10,10 @@ import { logError } from '../utils/error-handler'
 /**
  * CLI Channel - 命令行交互通道
  *
- * 负责处理用户输入和显示 AI 响应
+ * 职责：
+ * - 只负责 I/O
+ * - 不处理业务逻辑
+ * - 通过回调与 Gateway 通信
  */
 export class CLIChannel extends BaseChannel {
   readonly id = 'cli'
@@ -21,18 +23,11 @@ export class CLIChannel extends BaseChannel {
   private aiResponse = ''
   private isWaitingResponse = false
 
-  private session: Session | null = null
-  private sessionManager: SessionManager | null = null
   private resourceManager = new ResourceManager()
 
-  constructor(eventBus: EventBus, sessionId?: string) {
-    super(eventBus)
+  constructor(sessionId?: string) {
+    super()
     this.sessionId = sessionId || 'cli:default'
-  }
-
-  async initialize(sessionManager: SessionManager): Promise<void> {
-    this.sessionManager = sessionManager
-    this.session = await sessionManager.getOrCreate(this.sessionId!)
   }
 
   async start(): Promise<void> {
@@ -42,7 +37,6 @@ export class CLIChannel extends BaseChannel {
     try {
       this.setupReadline()
       this.setupResourceCleanup()
-      this.subscribeEvents()
       this.setupInterruptHandler()
       this.showPrompt()
     } catch (error) {
@@ -50,10 +44,10 @@ export class CLIChannel extends BaseChannel {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-            ErrorCode.CHANNEL_CONNECTION_FAILED,
-            'Failed to start CLI channel',
-            error instanceof Error ? error : undefined,
-          )
+              ErrorCode.CHANNEL_CONNECTION_FAILED,
+              'Failed to start CLI channel',
+              error instanceof Error ? error : undefined,
+            )
       logError(roxyError, 'error', 'CLIChannel')
       throw roxyError
     }
@@ -67,10 +61,10 @@ export class CLIChannel extends BaseChannel {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-            ErrorCode.RESOURCE_CLEANUP_FAILED,
-            'Failed to cleanup CLI channel resources',
-            error instanceof Error ? error : undefined,
-          ),
+              ErrorCode.RESOURCE_CLEANUP_FAILED,
+              'Failed to cleanup CLI channel resources',
+              error instanceof Error ? error : undefined,
+            ),
         'warn',
         'CLIChannel',
       )
@@ -80,8 +74,33 @@ export class CLIChannel extends BaseChannel {
     }
   }
 
-  async display(): Promise<void> {
-    // No-op - events are handled via subscriptions
+  /**
+   * 接收来自 Gateway 的消息
+   */
+  async receive(message: ChannelMessage): Promise<void> {
+    switch (message.type) {
+      case 'stream':
+        this.showStream(message.content?.chunk || message.data?.chunk)
+        break
+      case 'response':
+        this.showResponse(message.content || message.data?.content)
+        break
+      case 'tool_call':
+        this.showToolCall(message.data?.name, message.data?.args)
+        break
+      case 'tool_result':
+        this.showToolResult(message.data?.name, message.data?.result, message.data?.error)
+        break
+      case 'subagent_start':
+        this.showSubAgentStart(message.data?.taskId, message.data?.label, message.data?.task)
+        break
+      case 'subagent_complete':
+        this.showSubAgentComplete(message.data?.taskId, message.data?.label, message.data?.result, message.data?.success, message.data?.error)
+        break
+      case 'error':
+        this.showError(message.content || message.data?.error)
+        break
+    }
   }
 
   // ==================== Private Methods ====================
@@ -126,47 +145,6 @@ export class CLIChannel extends BaseChannel {
     })
   }
 
-  private subscribeEvents(): void {
-    this.eventBus.on('agent:stream', (event) => {
-      if (event.channelId === this.id) {
-        this.showStream(event.chunk)
-      }
-    })
-
-    this.eventBus.on('agent:response', (event) => {
-      if (event.channelId === this.id) {
-        this.showResponse(event.content)
-      }
-    })
-
-    this.eventBus.on('agent:tool_call', (event) => {
-      if (event.channelId === this.id) {
-        this.showToolCall(event.toolName, event.toolArgs)
-      }
-    })
-
-    this.eventBus.on('agent:tool_result', (event) => {
-      if (event.channelId === this.id) {
-        this.showToolResult(event.toolName, event.toolResult, event.error)
-      }
-    })
-
-    // SubAgent 独立事件
-    this.eventBus.on('subagent:start', (event) => {
-      this.showSubAgentStart(event)
-    })
-
-    this.eventBus.on('subagent:complete', (event) => {
-      this.showSubAgentComplete(event)
-    })
-
-    this.eventBus.on('error', (event) => {
-      if (event.channelId === this.id) {
-        this.showError(event.error instanceof Error ? event.error.message : String(event.error))
-      }
-    })
-  }
-
   private async handleLine(input: string): Promise<void> {
     const trimmedInput = input.trim()
 
@@ -187,7 +165,7 @@ export class CLIChannel extends BaseChannel {
     this.aiResponse = ''
 
     this.showTyping('Thinking...')
-    await this.handleInput(trimmedInput)
+    this.send(trimmedInput)
   }
 
   private async handleCommand(cmd: string): Promise<void> {
@@ -198,24 +176,10 @@ export class CLIChannel extends BaseChannel {
         process.exit(0)
         break
       case '/clear':
-        if (this.session) {
-          this.session.clear()
-          if (this.sessionManager) {
-            this.sessionManager.save(this.session.id)
-          }
-        }
-        console.log(chalk.yellow('🗑️  Session cleared'))
+        console.log(chalk.yellow('🗑️  Session cleared (note: session data still persisted)'))
         break
       case '/history':
-        console.log(chalk.gray('\n📜 History:'))
-        if (this.session) {
-          const history = this.session.getHistory()
-          history.forEach((msg) => {
-            const role = msg.role === 'user' ? chalk.green.bold('You') : chalk.cyan.bold('AI')
-            const preview = msg.content.slice(0, 80) + (msg.content.length > 80 ? '...' : '')
-            console.log(`  ${role}: ${preview}`)
-          })
-        }
+        console.log(chalk.gray('\n📜 History command not available in this mode'))
         break
       case '/skills':
         console.log(chalk.gray('🔄 Reloading skills...'))
@@ -223,7 +187,7 @@ export class CLIChannel extends BaseChannel {
       case '/help':
         console.log(chalk.gray('\n📚 Commands:'))
         console.log(chalk.gray('  /help     - Show help'))
-        console.log(chalk.gray('  /clear    - Clear history'))
+        console.log(chalk.gray('  /clear    - Clear session'))
         console.log(chalk.gray('  /history  - Show history'))
         console.log(chalk.gray('  /skills   - Reload skills'))
         console.log(chalk.gray('  /exit     - Exit\n'))
@@ -257,7 +221,7 @@ export class CLIChannel extends BaseChannel {
     process.stdout.write(chunk)
   }
 
-  private showResponse(content: string): void {
+  private showResponse(_content: string): void {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
       this.spinner = null
@@ -265,7 +229,6 @@ export class CLIChannel extends BaseChannel {
     process.stdout.write('\n')
     this.isWaitingResponse = false
     this.aiResponse = ''
-    // console.log(content)
     this.showPrompt()
   }
 
@@ -302,43 +265,51 @@ export class CLIChannel extends BaseChannel {
     this.spinner = null
   }
 
-  private showSubAgentStart(event: any): void {
-    // 停止可能的 spinner
+  private showSubAgentStart(taskId: string, label: string, task: string): void {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
     }
 
-    // 显示 SubAgent 启动通知
-    console.log(chalk.cyan(`\n└─ 🚀 SubAgent [${event.label}] started`))
-    console.log(
-      chalk.cyan(`   Task: ${event.task.slice(0, 100)}${event.task.length > 100 ? '...' : ''}`),
-    )
-    console.log()
+    if (this.aiResponse) {
+      process.stdout.write('\n')
+    }
+
+    console.log(chalk.dim(`└─ 🤖 SubAgent [${label}] started (id: ${taskId})`))
+    console.log(chalk.dim(`   Task: ${task.length > 60 ? task.slice(0, 60) + '...' : task}\n`))
+
+    this.spinner = ora({
+      text: chalk.dim('subagent working...'),
+      spinner: 'dots',
+      color: 'gray',
+    }).start()
   }
 
-  private showSubAgentComplete(event: any): void {
-    // 停止可能的 spinner
+  private showSubAgentComplete(
+    taskId: string,
+    label: string,
+    result: string,
+    success: boolean,
+    error?: string,
+  ): void {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
     }
 
-    // 显示 SubAgent 完成状态
-    const statusIcon = event.success ? chalk.green('✅') : chalk.red('❌')
-    const statusText = event.success ? 'completed' : 'failed'
+    const status = success ? '✅' : '❌'
+    const statusText = success ? 'completed' : 'failed'
 
-    console.log(chalk.cyan(`\n└─ ${statusIcon} SubAgent [${event.label}] ${statusText}`))
+    console.log(chalk.dim(`└─ ${status} SubAgent [${label}] ${statusText}`))
 
-    // 显示结果
-    if (event.result) {
-      console.log(chalk.gray(event.result))
+    if (result) {
+      const preview = result.length > 200 ? result.slice(0, 200) + '...' : result
+      console.log(chalk.dim(`   Result: ${preview}\n`))
     }
 
-    console.log()
+    if (error) {
+      console.log(chalk.red(`   Error: ${error}\n`))
+    }
 
-    // 重置状态并显示提示符
-    this.isWaitingResponse = false
-    this.aiResponse = ''
-    this.showPrompt()
+    this.spinner = null
   }
 
   private showError(content: string): void {

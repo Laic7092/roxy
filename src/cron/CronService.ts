@@ -139,12 +139,13 @@ export class CronService {
           try {
             const nextDates = cronJob.nextDates?.()
             if (nextDates && nextDates[0]) {
-              job.nextExecution = typeof nextDates[0].toDate === 'function' 
-                ? nextDates[0].toDate() 
+              job.nextExecution = typeof nextDates[0].toDate === 'function'
+                ? nextDates[0].toDate()
                 : nextDates[0]
             }
           } catch (_e) {
             // Ignore if nextDates is not available
+            // eslint-disable-next-line no-unused-vars
           }
         }
 

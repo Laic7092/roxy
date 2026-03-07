@@ -1,16 +1,14 @@
-import type { EventBus } from '../bus/instance'
+import type { IChannel, ChannelMessage, ChannelInputHandler, ChannelOutputHandler } from './types'
 
 /**
  * Channel 抽象基类
  *
- * 所有通道（CLI、WEB 等）都应继承此类，实现具体的输入输出逻辑
- *
  * 职责：
  * - 只负责 I/O
- * - 发布用户消息事件
- * - 监听并显示 Agent 响应
+ * - 不处理业务逻辑
+ * - 通过回调与 Gateway 通信
  */
-export abstract class BaseChannel {
+export abstract class BaseChannel implements IChannel {
   /**
    * 通道唯一标识
    */
@@ -27,12 +25,27 @@ export abstract class BaseChannel {
   protected sessionId: string | null = null
 
   /**
-   * EventBus 实例
+   * 输入处理器
    */
-  protected eventBus: EventBus
+  protected inputHandler: ChannelInputHandler | null = null
 
-  constructor(eventBus: EventBus) {
-    this.eventBus = eventBus
+  /**
+   * 输出处理器
+   */
+  protected outputHandler: ChannelOutputHandler | null = null
+
+  /**
+   * 设置输入处理器
+   */
+  setInputHandler(handler: ChannelInputHandler): void {
+    this.inputHandler = handler
+  }
+
+  /**
+   * 设置输出处理器
+   */
+  setOutputHandler(handler: ChannelOutputHandler): void {
+    this.outputHandler = handler
   }
 
   /**
@@ -46,20 +59,18 @@ export abstract class BaseChannel {
   abstract stop(): Promise<void>
 
   /**
-   * 显示消息到通道
+   * 发送消息到 Gateway (Input)
    */
-  abstract display(msg: any): Promise<void>
+  send(content: string): void {
+    if (this.inputHandler) {
+      this.inputHandler(content)
+    }
+  }
 
   /**
-   * 处理用户输入 - 发布事件
+   * 接收来自 Gateway 的消息 (Output)
    */
-  protected async handleInput(content: string): Promise<void> {
-    this.eventBus.publishUserMessage({
-      channelId: this.id,
-      sessionId: this.sessionId!,
-      content,
-    })
-  }
+  abstract receive(message: ChannelMessage): Promise<void>
 
   /**
    * 创建新会话
@@ -80,7 +91,7 @@ export abstract class BaseChannel {
   /**
    * 获取当前会话 ID
    */
-  getSessionId(): string | null {
+  get sessionIdValue(): string | null {
     return this.sessionId
   }
 

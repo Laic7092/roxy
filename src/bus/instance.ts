@@ -2,17 +2,16 @@ import mitt, { Handler } from 'mitt'
 import type { EventMap } from './events'
 
 /**
- * EventBus - 事件驱动架构核心
+ * EventBus - 纯粹的事件总线
  *
- * 功能：
- * - 发布/订阅模式 - 支持多类型事件
- * - 类型安全 - 使用 TypeScript 泛型
+ * 职责：
+ * - 只负责 inbound/outbound msg (事件的发布和订阅)
+ * - 不处理业务逻辑
+ * - 提供类型安全的事件系统
  */
 export class EventBus {
   // 事件发射器
   private emitter = mitt<EventMap>()
-
-  // ========== 事件系统 ==========
 
   /**
    * 订阅事件
@@ -36,98 +35,98 @@ export class EventBus {
   }
 
   /**
-   * 发布用户消息事件
+   * 发布用户消息事件 (Inbound)
    */
   publishUserMessage(data: Omit<EventMap['user:message'], 'timestamp'>): void {
     this.emit('user:message', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 响应事件
+   * 发布 Agent 响应事件 (Outbound)
    */
   publishAgentResponse(data: Omit<EventMap['agent:response'], 'timestamp'>): void {
     this.emit('agent:response', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 流式输出事件
+   * 发布 Agent 流式输出事件 (Outbound)
    */
   publishAgentStream(data: Omit<EventMap['agent:stream'], 'timestamp'>): void {
     this.emit('agent:stream', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 工具调用事件
+   * 发布 Agent 工具调用事件 (Outbound)
    */
   publishAgentToolCall(data: Omit<EventMap['agent:tool_call'], 'timestamp'>): void {
     this.emit('agent:tool_call', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 工具调用结果事件
+   * 发布 Agent 工具调用结果事件 (Outbound)
    */
   publishAgentToolResult(data: Omit<EventMap['agent:tool_result'], 'timestamp'>): void {
     this.emit('agent:tool_result', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 任务执行事件
+   * 发布 Agent 任务执行事件 (Internal)
    */
   publishAgentExecute(data: EventMap['agent:execute']): void {
     this.emit('agent:execute', data)
   }
 
   /**
-   * 发布 Agent 任务完成事件
+   * 发布 Agent 任务完成事件 (Internal)
    */
   publishAgentTaskComplete(data: Omit<EventMap['agent:task:complete'], 'timestamp'>): void {
     this.emit('agent:task:complete', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 任务失败事件
+   * 发布 Agent 任务失败事件 (Internal)
    */
   publishAgentTaskFailed(data: Omit<EventMap['agent:task:failed'], 'timestamp'>): void {
     this.emit('agent:task:failed', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 Agent 生成事件
+   * 发布 Agent 生成事件 (Internal)
    */
   publishAgentSpawn(data: EventMap['agent:spawn']): void {
     this.emit('agent:spawn', data)
   }
 
   /**
-   * 发布 Agent 委托事件
+   * 发布 Agent 委托事件 (Internal)
    */
   publishAgentDelegate(data: EventMap['agent:delegate']): void {
     this.emit('agent:delegate', data)
   }
 
   /**
-   * 发布 SubAgent 任务开始事件
+   * 发布 SubAgent 任务开始事件 (Outbound)
    */
   publishSubAgentStart(data: Omit<EventMap['subagent:start'], 'timestamp'>): void {
     this.emit('subagent:start', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布 SubAgent 任务完成事件
+   * 发布 SubAgent 任务完成事件 (Outbound)
    */
   publishSubAgentComplete(data: Omit<EventMap['subagent:complete'], 'timestamp'>): void {
     this.emit('subagent:complete', { ...data, timestamp: new Date() })
   }
 
   /**
-   * 发布会话保存事件
+   * 发布会话保存事件 (Internal)
    */
   publishSessionSave(data: EventMap['session:save']): void {
     this.emit('session:save', data)
   }
 
   /**
-   * 发布错误事件
+   * 发布错误事件 (Outbound)
    */
   publishError(data: EventMap['error']): void {
     this.emit('error', data)

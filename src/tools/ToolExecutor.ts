@@ -1,11 +1,16 @@
-import { readdir, stat } from 'fs/promises'
-import { join, extname, basename, dirname } from 'path'
-import { fileURLToPath } from 'url'
 import { v4 as uuidv4 } from 'uuid'
-import { createLogger, LogLevel } from '../utils/logger'
+import { log, logError } from '../utils/error-handler'
+import { RoxyError, ErrorCode } from '../types/errors'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
+/**
+ * ToolFunction - 工具函数定义
+ * 
+ * 每个工具必须包含：
+ * - name: 工具名称
+ * - description: 工具描述
+ * - parameters: JSON Schema 格式的参数定义
+ * - execute: 执行函数，接收 args、workspace 和 context
+ */
 export interface ToolFunction {
   name: string
   description: string
@@ -14,141 +19,92 @@ export interface ToolFunction {
     properties: Record<string, any>
     required: string[]
   }
-  execute: (args: any, workspace: string, context?: { channelId: string; sessionId: string }) => Promise<any>
+  execute: (
+    args: any,
+    workspace: string,
+    context?: { channelId: string; sessionId: string },
+  ) => Promise<any>
 }
 
+/**
+ * ToolExecutionResult - 工具执行结果
+ */
+export interface ToolExecutionResult {
+  result: any
+  tool_call_id: string
+}
+
+/**
+ * ToolExecutor - 工具执行器
+ * 
+ * 职责：
+ * - 管理工具注册
+ * - 执行工具调用
+ * - 处理工具错误
+ * 
+ * 架构原则：
+ * - 不自动扫描注册工具，由 Gateway 显式注册
+ * - Context 通过 executeTool 参数传递，不内部存储
+ * - 统一的错误处理和日志记录
+ */
 export class ToolExecutor {
   private tools: Map<string, ToolFunction> = new Map()
   private workspace: string
-  private logger: ReturnType<typeof createLogger>
-  private initializationPromise: Promise<void>
-  private context: { channelId: string; sessionId: string } | null = null
+  private initialized = false
 
   constructor(workspace: string) {
     this.workspace = workspace
-    // 默认只显示 INFO 及以上级别的日志到控制台
-    this.logger = createLogger(workspace, {
-      logToConsole: true,
-      enabledLevels: [LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR, LogLevel.SUCCESS]
-    })
-    // 初始化工具注册，并保存 Promise 以供后续等待
-    this.initializationPromise = this.initializeTools(__dirname)
   }
 
   /**
-   * 设置执行上下文（用于需要上下文的 Tool）
+   * 初始化工具执行器
    */
-  setContext(context: { channelId: string; sessionId: string }): void {
-    this.context = context
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      log('warn', 'ToolExecutor already initialized', 'ToolExecutor')
+      return
+    }
+
+    log('info', `Initializing ToolExecutor with workspace: ${this.workspace}`, 'ToolExecutor')
+    this.initialized = true
+    log('success', `ToolExecutor initialized with ${this.tools.size} tool(s)`, 'ToolExecutor')
   }
 
   /**
-   * 初始化工具注册
+   * 注册单个工具
    */
-  private async initializeTools(toolsDir: string) {
-    await this.autoRegisterTools(toolsDir)
+  registerTool(tool: ToolFunction): void {
+    if (this.tools.has(tool.name)) {
+      log('warn', `Tool '${tool.name}' is already registered and will be overwritten`, 'ToolExecutor')
+    }
+    this.tools.set(tool.name, tool)
+    log('debug', `Tool registered: ${tool.name}`, 'ToolExecutor')
   }
 
   /**
-   * 自动扫描并注册工具目录下的所有工具
+   * 注册多个工具
    */
-  async autoRegisterTools(toolsDir: string) {
-    try {
-      const files = await readdir(toolsDir)
-
-      for (const file of files) {
-        const filePath = join(toolsDir, file)
-        const stats = await stat(filePath)
-
-        if (stats.isDirectory()) {
-          // 递归扫描子目录
-          await this.autoRegisterTools(filePath)
-        } else if (
-          stats.isFile() &&
-          (extname(file) === '.ts' ||
-            extname(file) === '.js' ||
-            extname(file) === '.mjs' ||
-            extname(file) === '.cjs')
-        ) {
-          // 跳过自身、索引文件、以及需要手动注册的特殊 Tool
-          if (
-            basename(file, extname(file)) !== 'ToolExecutor' &&
-            basename(file, extname(file)) !== 'index' &&
-            basename(file, extname(file)) !== 'ToolRegistry' &&
-            basename(file, extname(file)) !== 'ToolRegistrar' &&
-            basename(file, extname(file)) !== 'CronTool' && // 需要手动注册（需要上下文）
-            basename(file, extname(file)) !== 'SpawnTool'   // 需要手动注册（需要上下文）
-          ) {
-            try {
-              // 动态导入工具文件
-              const module = await import(`file://${filePath}`)
-
-              // 查找导出的工具函数
-              for (const key in module) {
-                const exportedItem = module[key]
-
-                // 检查是否为工具函数格式
-                if (this.isToolFunctionFormat(exportedItem)) {
-                  if (this.tools.has(exportedItem.name)) {
-                    await this.logger.warn(
-                      `Tool ${exportedItem.name} is already registered and will be overwritten.`,
-                    )
-                  }
-                  this.tools.set(exportedItem.name, exportedItem)
-                  await this.logger.debug(`Tool registered: ${exportedItem.name}`)
-                }
-
-                // 检查是否为工具数组
-                if (Array.isArray(exportedItem) && exportedItem.length > 0) {
-                  for (const tool of exportedItem) {
-                    if (this.isToolFunctionFormat(tool)) {
-                      if (this.tools.has(tool.name)) {
-                        await this.logger.warn(
-                          `Tool ${tool.name} is already registered and will be overwritten.`,
-                        )
-                      }
-                      this.tools.set(tool.name, tool)
-                      await this.logger.debug(`Tool registered: ${tool.name}`)
-                    }
-                  }
-                }
-              }
-            } catch (importError) {
-              await this.logger.error(`Error importing tool file ${filePath}`, {
-                error: importError instanceof Error ? importError.message : String(importError),
-              })
-            }
-          }
-        }
-      }
-
-      await this.logger.debug(`Tool scanning completed. Total tools: ${this.tools.size}`)
-    } catch (error) {
-      await this.logger.error('Error auto-registering tools', {
-        error: error instanceof Error ? error.message : String(error),
-      })
+  registerTools(tools: ToolFunction[]): void {
+    for (const tool of tools) {
+      this.registerTool(tool)
     }
   }
 
   /**
-   * 检查对象是否符合工具函数格式
+   * 注销工具
    */
-  private isToolFunctionFormat(obj: any): obj is ToolFunction {
-    return (
-      obj &&
-      typeof obj.name === 'string' &&
-      typeof obj.description === 'string' &&
-      obj.parameters &&
-      typeof obj.execute === 'function'
-    )
+  unregisterTool(toolName: string): boolean {
+    const result = this.tools.delete(toolName)
+    if (result) {
+      log('debug', `Tool unregistered: ${toolName}`, 'ToolExecutor')
+    }
+    return result
   }
 
   /**
-   * 获取所有可用工具的定义
+   * 获取所有可用工具的定义（用于 LLM API）
    */
   async getToolDefinitions(): Promise<any[]> {
-    // 等待初始化完成
-    await this.initializationPromise
     return Array.from(this.tools.values()).map((tool) => ({
       type: 'function',
       function: {
@@ -160,73 +116,96 @@ export class ToolExecutor {
   }
 
   /**
-   * 执行指定的工具
+   * 获取工具数量
+   */
+  getToolCount(): number {
+    return this.tools.size
+  }
+
+  /**
+   * 执行单个工具
+   * 
    * @param toolName 工具名称
    * @param argumentsObj 参数对象
-   * @param providedId 如果 AI 提供了 ID 则使用该 ID，否则生成新 ID
+   * @param providedId 可选的工具调用 ID（由 LLM 提供）
    * @param context 执行上下文（channelId, sessionId）
    */
   async executeTool(
     toolName: string,
     argumentsObj: any,
     providedId?: string,
-    context?: { channelId?: string; sessionId?: string },
-  ): Promise<{ result: any; tool_call_id: string }> {
-    await this.initializationPromise
+    context?: { channelId: string; sessionId: string },
+  ): Promise<ToolExecutionResult> {
+    if (!this.initialized) {
+      await this.initialize()
+    }
 
-    // 优先使用传入的 context，否则使用存储的 context
-    const execContext = context || this.context
+    const toolCallId = providedId || `call_${uuidv4()}`
 
-    await this.logger.debug(`Executing tool: ${toolName}`, {
+    log('debug', `Executing tool: ${toolName}`, 'ToolExecutor', {
       arguments: argumentsObj,
-      context: execContext,
+      context,
+      toolCallId,
     })
 
     const tool = this.tools.get(toolName)
 
     if (!tool) {
-      await this.logger.error(`Tool not found: ${toolName}`)
+      const error = new RoxyError(ErrorCode.TOOL_NOT_FOUND, `Tool '${toolName}' not found`, undefined, {
+        toolName,
+        availableTools: Array.from(this.tools.keys()),
+      })
+      logError(error, 'error', 'ToolExecutor')
       return {
-        result: { success: false, error: `Tool '${toolName}' not found` },
-        tool_call_id: providedId || `call_${uuidv4()}`,
+        result: { success: false, error: error.message },
+        tool_call_id: toolCallId,
       }
     }
 
     try {
-      const resultObj = execContext
-        ? await tool.execute(argumentsObj, this.workspace, execContext)
-        : await tool.execute(argumentsObj, this.workspace)
-      const { success, ...rest } = resultObj
-      const result = Object.entries(rest)[0]
-        ? this.formatToolOutput(Object.entries(rest)[0][1])
-        : 'success'
+      // 执行工具
+      const resultObj = await tool.execute(argumentsObj, this.workspace, context)
 
-      await this.logger.debug(`Tool executed successfully: ${toolName}`, {
-        result: result.substring(0, 100) + (result.length > 100 ? '...' : ''),
+      // 格式化输出
+      const formattedResult = this.formatToolOutput(resultObj)
+
+      log('debug', `Tool executed successfully: ${toolName}`, 'ToolExecutor', {
+        result: formattedResult.substring(0, 100) + (formattedResult.length > 100 ? '...' : ''),
       })
 
       return {
-        result,
-        tool_call_id: providedId || `call_${uuidv4()}`,
+        result: formattedResult,
+        tool_call_id: toolCallId,
       }
     } catch (error) {
-      await this.logger.error(`Tool execution failed: ${toolName}`, {
-        error: error instanceof Error ? error.message : String(error),
-      })
+      const roxyError =
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.TOOL_EXECUTION_FAILED,
+              `Tool '${toolName}' execution failed`,
+              error instanceof Error ? error : undefined,
+              { toolName, arguments: argumentsObj },
+            )
+
+      logError(roxyError, 'error', 'ToolExecutor')
+
       return {
-        result: { success: false, error: error instanceof Error ? error.message : String(error) },
-        tool_call_id: providedId || `call_${uuidv4()}`,
+        result: { success: false, error: roxyError.message },
+        tool_call_id: toolCallId,
       }
     }
   }
 
   /**
    * 执行多个工具调用
+   * 
    * @param toolCalls 工具调用数组，每个元素包含 name, arguments 和可选的 id
+   * @param context 执行上下文（channelId, sessionId）
    */
   async executeTools(
     toolCalls: Array<{ name: string; arguments: string; id?: string }>,
-    context?: { channelId?: string; sessionId?: string },
+    context?: { channelId: string; sessionId: string },
   ): Promise<
     Array<{
       result: any
@@ -234,17 +213,31 @@ export class ToolExecutor {
       name: string
     }>
   > {
-    // 等待初始化完成
-    await this.initializationPromise
+    if (!this.initialized) {
+      await this.initialize()
+    }
 
-    await this.logger.debug(`Executing ${toolCalls.length} tool(s)`, {
+    log('debug', `Executing ${toolCalls.length} tool(s)`, 'ToolExecutor', {
       tools: toolCalls.map((t) => t.name),
     })
 
     const results = await Promise.all(
       toolCalls.map(async ({ name, arguments: argsStr, id }) => {
         try {
-          const args = JSON.parse(argsStr)
+          // 解析参数
+          let args: any
+          try {
+            args = JSON.parse(argsStr)
+          } catch (parseError) {
+            throw new RoxyError(
+              ErrorCode.TOOL_ARGUMENT_PARSE_ERROR,
+              `Failed to parse arguments for tool '${name}'`,
+              parseError instanceof Error ? parseError : undefined,
+              { rawArguments: argsStr },
+            )
+          }
+
+          // 执行工具
           const { result, tool_call_id } = await this.executeTool(name, args, id, context)
 
           return {
@@ -253,14 +246,20 @@ export class ToolExecutor {
             name,
           }
         } catch (error) {
-          await this.logger.error(`Invalid arguments for tool: ${name}`, {
-            error: error instanceof Error ? error.message : String(error),
-          })
+          const roxyError =
+            error instanceof RoxyError
+              ? error
+              : new RoxyError(
+                  ErrorCode.TOOL_EXECUTION_FAILED,
+                  `Failed to execute tool '${name}'`,
+                  error instanceof Error ? error : undefined,
+                  { toolName: name },
+                )
+
+          logError(roxyError, 'error', 'ToolExecutor')
+
           return {
-            result: {
-              success: false,
-              error: `Invalid arguments for tool '${name}': ${error instanceof Error ? error.message : String(error)}`,
-            },
+            result: { success: false, error: roxyError.message },
             tool_call_id: id || `call_${uuidv4()}`,
             name,
           }
@@ -269,13 +268,20 @@ export class ToolExecutor {
     )
 
     const successCount = results.filter((r) => !r.result?.success === false).length
-    await this.logger.debug(
-      `Tool execution completed: ${successCount}/${toolCalls.length} successful`,
-    )
+    log('debug', `Tool execution completed: ${successCount}/${toolCalls.length} successful`, 'ToolExecutor')
 
     return results
   }
 
+  /**
+   * 格式化工具输出
+   * 
+   * 支持多种输出格式：
+   * - null/undefined -> ''
+   * - string -> 原样返回
+   * - object -> JSON.stringify (缩进 2 空格)
+   * - 其他类型 -> String() 转换
+   */
   formatToolOutput(output: unknown): string {
     if (output === null || output === undefined) {
       return ''
@@ -293,30 +299,24 @@ export class ToolExecutor {
   }
 
   /**
-   * 注册新工具
-   * @param toolDefinition 工具定义
-   * @returns 是否注册成功
+   * 检查工具是否存在
    */
-  registerTool(toolDefinition: ToolFunction): boolean {
-    if (this.tools.has(toolDefinition.name)) {
-      this.logger.warn(`Tool ${toolDefinition.name} is already registered and will be overwritten.`)
-    }
-
-    this.tools.set(toolDefinition.name, toolDefinition)
-    this.logger.debug(`Tool registered: ${toolDefinition.name}`)
-    return true
+  hasTool(toolName: string): boolean {
+    return this.tools.has(toolName)
   }
 
   /**
-   * 注销工具
-   * @param toolName 工具名称
-   * @returns 是否注销成功
+   * 获取所有工具名称列表
    */
-  unregisterTool(toolName: string): boolean {
-    const result = this.tools.delete(toolName)
-    if (result) {
-      this.logger.debug(`Tool unregistered: ${toolName}`)
-    }
-    return result
+  getToolNames(): string[] {
+    return Array.from(this.tools.keys())
+  }
+
+  /**
+   * 清空所有工具
+   */
+  clearTools(): void {
+    this.tools.clear()
+    log('debug', 'All tools cleared', 'ToolExecutor')
   }
 }

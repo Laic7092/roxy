@@ -207,13 +207,14 @@ export class SubAgentManager {
           const { content, tool_calls } = result.choices[0].message
           session.addMessage('assistant', content || '', tool_calls)
 
-          // 执行工具调用
+          // 执行工具调用（传递 SubAgent 自己的上下文）
           const toolResults = await this.toolExecutor.executeTools(
             toolCalls.map((call: any) => ({
               name: call.function.name,
               arguments: call.function.arguments,
               id: call.id,
             })),
+            { channelId: task.channelId, sessionId: task.sessionId },
           )
 
           // 添加工具结果

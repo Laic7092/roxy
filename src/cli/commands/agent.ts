@@ -1,16 +1,8 @@
 import { Command } from 'commander'
 import chalk from 'chalk'
 import { CLIChannel } from '../../channels/cli.channel'
-import { SessionManager } from '../../session/manager'
-import { LiteLLMProvider } from '../../provider/llm'
-import { ToolExecutor } from '../../tools/ToolExecutor'
+import { RoxyGateway } from '../../gateway/gateway'
 import { loadConfig } from '../../config/manager'
-import { getEventBus } from '../../bus/instance'
-import { AgentFactory } from '../../agent/factory'
-import { AgentOrchestrator } from '../../orchestrator/orchestrator'
-import { SubAgentManager } from '../../agent/subAgent'
-import { createSpawnTools } from '../../tools/SpawnTool'
-import { createCronTools } from '../../tools/CronTool'
 
 export const AgentCommand = new Command('agent')
 
@@ -23,86 +15,55 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       const config = await loadConfig()
       const workspace = config.workspace
 
-      // 获取 EventBus 单例
-      const eventBus = getEventBus()
-
-      // 初始化会话管理器
-      const sessionManager = new SessionManager()
-      sessionManager.setEventBus(eventBus) // 设置事件总线，自动保存
-
       const sessionId = options.session || 'cli:default'
 
       // 如果设置了清除选项，则清空会话历史
       if (options.clear) {
+        const { SessionManager } = await import('../../session/manager')
+        const sessionManager = new SessionManager()
         const session = await sessionManager.getOrCreate(sessionId)
         session.clear()
         await sessionManager.save(sessionId)
         console.log(chalk.yellow('🗑️  Session history cleared'))
       }
 
-      // 初始化 Provider
-      const curProvider = config.agents.defaults.model.split('/')[0]
-      const curModel = config.agents.defaults.model.split('/')[1]
-      const { apiKey, baseURL } = config.providers[curProvider]
-
-      const provider = new LiteLLMProvider({
-        apiKey,
-        baseURL,
-        model: curModel,
+      // 创建 Gateway
+      const gateway = new RoxyGateway({
+        config: {
+          workspace,
+          defaultModel: config.agents.defaults.model,
+        },
       })
-
-      // 初始化 ToolExecutor
-      const toolExecutor = new ToolExecutor(workspace)
-
-      // 初始化 SubAgentManager
-      const subAgentManager = new SubAgentManager({
-        provider,
-        eventBus,
-        sessionManager,
-        toolExecutor,
-        workspace,
-      })
-
-      // 注册需要上下文的 Tool（在知道 sessionId 后）
-      const toolContext = { channelId: 'cli', sessionId }
-      toolExecutor.setContext(toolContext)
-
-      // 注册 SpawnTool
-      const spawnTools = createSpawnTools(subAgentManager, toolContext)
-      spawnTools.forEach((tool) => toolExecutor.registerTool(tool))
-
-      // 注册 CronTool
-      const cronTools = createCronTools({
-        ...toolContext,
-        workspace,
-        eventBus,
-      })
-      cronTools.forEach((tool) => toolExecutor.registerTool(tool))
-
-      // 创建 AgentFactory
-      const agentFactory = new AgentFactory({
-        eventBus,
-        provider,
-        toolExecutor,
-        sessionManager,
-        workspace,
-      })
-
-      // 创建 AgentOrchestrator
-      const orchestrator = new AgentOrchestrator({
-        eventBus,
-        agentFactory,
-        sessionManager,
-      })
-
-      // 初始化默认 Agent
-      await orchestrator.initializeDefaultAgent()
 
       // 创建 CLI Channel
-      const channel = new CLIChannel(eventBus, sessionId)
+      const channel = new CLIChannel(sessionId)
 
-      // 初始化 Channel 的 Session
-      await channel.initialize(sessionManager)
+      // 设置输入处理器
+      channel.setInputHandler(async (content) => {
+        await gateway.receive({
+          channelId: channel.id,
+          sessionId: channel.sessionIdValue!,
+          content,
+        })
+      })
+
+      // 设置输出处理器
+      channel.setOutputHandler(async (message) => {
+        await channel.receive(message)
+      })
+
+      // 注册 Gateway 输出到 Channel
+      gateway.on(channel.id, async (output) => {
+        await channel.receive({
+          type: output.type,
+          data: output.data,
+          sessionId: output.sessionId,
+          channelId: output.channelId,
+        })
+      })
+
+      // 启动 Gateway
+      await gateway.start()
 
       // 启动 Channel
       await channel.start()
@@ -110,13 +71,13 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
       // 处理进程退出
       process.on('SIGINT', async () => {
         await channel.stop()
-        await orchestrator.dispose()
+        await gateway.stop()
         process.exit(0)
       })
 
       process.on('SIGTERM', async () => {
         await channel.stop()
-        await orchestrator.dispose()
+        await gateway.stop()
         process.exit(0)
       })
     } catch (error) {
