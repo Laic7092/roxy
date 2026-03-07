@@ -133,8 +133,6 @@ function isSensitivePath(path: string): boolean {
     '/proc/',
     '/sys',
     '/sys/',
-    '/tmp',
-    '/tmp/', // 虽然/tmp是临时目录，但出于安全考虑，限制对它的访问
   ]
 
   return sensitivePaths.some((sensitive) => path === sensitive || path.startsWith(sensitive + '/'))

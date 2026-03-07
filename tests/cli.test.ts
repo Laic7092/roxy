@@ -45,7 +45,8 @@ describe('CLI Application', () => {
     const result = await runCliCommand(['onboard'])
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain('Roxy onboarding process')
+    expect(result.stdout).toContain('Roxy Onboarding')
+    expect(result.stdout).toContain('Initialization complete')
   })
 
   it('should handle agent command options', async () => {

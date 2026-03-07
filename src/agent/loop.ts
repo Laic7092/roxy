@@ -3,8 +3,7 @@ import type { ContextMng } from './context'
 import type { Session, SessionManager } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 import type { Bus } from '../bus/instance'
-import type { AgentConfig, AgentTask } from './types'
-import { TaskStatus } from './types'
+import type { AgentConfig } from './types'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log, withTimeout } from '../utils/error-handler'
 
@@ -17,19 +16,30 @@ export interface AgentLoopDeps {
   sessionManager: SessionManager
 }
 
+export interface RunContext {
+  taskId: string
+  agentId: string
+  channelId: string
+  sessionId: string
+  content: string
+}
+
+export interface RunResult {
+  content: string
+  toolCalls?: Array<{ id: string; name: string; arguments: string }>
+}
+
 /**
- * AgentLoop - 事件驱动的消息处理器
+ * AgentLoop - LLM 对话引擎
  *
  * 职责：
- * - 监听 agent:execute 事件执行任务
- * - 处理 LLM 对话和工具调用
- * - 发布响应事件到 Bus
+ * - 处理 LLM 对话和工具调用循环
+ * - 发布响应/工具调用事件到 Bus
  */
 export class AgentLoop {
-  // 配置常量
   private static readonly MAX_ITERATIONS = 20
-  private static readonly MAX_TIME_MS = 5 * 60 * 1000 // 5 分钟
-  private static readonly LLM_TIMEOUT_MS = 30000 // 30 秒
+  private static readonly MAX_TIME_MS = 5 * 60 * 1000
+  private static readonly LLM_TIMEOUT_MS = 30000
 
   private config: AgentConfig
   private provider: LiteLLMProvider
@@ -37,8 +47,6 @@ export class AgentLoop {
   private bus: Bus
   private context: ContextMng
   private sessionManager: SessionManager
-
-  // 当前会话引用
   private session: Session | null = null
 
   constructor(deps: AgentLoopDeps) {
@@ -49,291 +57,173 @@ export class AgentLoop {
     this.context = deps.context
     this.sessionManager = deps.sessionManager
 
-    // 订阅执行事件
     this.setupEventHandlers()
   }
 
-  /**
-   * 设置事件处理器
-   */
   private setupEventHandlers(): void {
-    // 监听 agent:execute 事件
     this.bus.on('agent:execute', async (event) => {
-      // 只处理分配给此 Agent 的任务
-      if (event.task.agentId === this.config.id) {
-        await this.executeTask(event.task)
+      if (event.agentId === this.config.id) {
+        await this.run(event)
       }
     })
 
-    // 监听 subagent:complete 事件
-    this.bus.on('subagent:complete', (event) => {
-      // 只处理属于当前会话的结果
-      if (this.session && event.parentSessionId === this.session.id) {
-        this.handleSubAgentComplete(event)
-      }
+    this.bus.on('subagent:complete', () => {
+      // SubAgent 完成事件，当前无需处理
     })
   }
 
   /**
-   * 处理 SubAgent 完成事件
+   * 运行 LLM 对话
    */
-  private handleSubAgentComplete(event: any): void {
-    log(
-      'debug',
-      `SubAgent complete event received: sessionId=${event.parentSessionId}, currentSession=${this.session?.id}`,
-      'AgentLoop',
-    )
-
-    // 只处理属于当前会话的结果
-    if (!this.session || event.parentSessionId !== this.session.id) {
-      log('debug', `Session mismatch, skipping`, 'AgentLoop')
-      return
-    }
-
-    log('debug', `SubAgent [${event.taskId}] result saved to session`, 'AgentLoop')
-  }
-
-  /**
-   * 执行任务
-   */
-  private async executeTask(task: AgentTask): Promise<void> {
+  async run(ctx: RunContext): Promise<RunResult> {
     const startTime = Date.now()
 
-    try {
-      // 更新任务状态
-      task.status = TaskStatus.RUNNING
+    this.session = await this.sessionManager.getOrCreate(ctx.sessionId)
+    this.session.addMessage('user', ctx.content)
+    await this.sessionManager.save(ctx.sessionId)
 
-      // 获取或创建会话
-      this.session = await this.getOrCreateSession(task.sessionId)
+    let contextMessages = await this.context.buildContext(this.session.messages)
+    const tools = await this.toolExecutor.getToolDefinitions()
 
-      // 添加用户消息并保存
-      this.session.addMessage('user', task.content)
-      await this.sessionManager.save(task.sessionId)
+    let hasToolCalls = true
+    let iteration = 0
+    let aiResponse = ''
+    let toolCallsResult: RunResult['toolCalls']
 
-      // 构建上下文
-      let contextMessages = await this.context.buildContext(this.session.messages)
+    while (hasToolCalls && iteration < AgentLoop.MAX_ITERATIONS) {
+      const elapsed = Date.now() - startTime
+      if (elapsed >= AgentLoop.MAX_TIME_MS) {
+        logError(new RoxyError(ErrorCode.TIMEOUT, 'Timeout exceeded'), 'error', 'AgentLoop')
+        this.session.addMessage('assistant', '处理超时')
+        break
+      }
 
-      // 获取工具定义
-      const tools = await this.toolExecutor.getToolDefinitions()
+      iteration++
+      hasToolCalls = false
 
-      // 循环处理，直到没有工具调用
-      let hasToolCalls = true
-      let iteration = 0
-      let aiResponse = ''
+      try {
+        const result = await withTimeout(
+          this.provider.chat({
+            messages: contextMessages,
+            model: this.config.model || this.provider.cfg.model,
+            stream: true,
+            onStreamData: (chunk) => this.handleStreamData(ctx, chunk),
+            tools,
+            tool_choice: 'auto',
+          }),
+          AgentLoop.LLM_TIMEOUT_MS,
+          'LLM chat',
+        )
 
-      while (hasToolCalls && iteration < AgentLoop.MAX_ITERATIONS) {
-        // 检查超时
-        const elapsed = Date.now() - startTime
-        if (elapsed >= AgentLoop.MAX_TIME_MS) {
-          const timeoutError = new RoxyError(
-            ErrorCode.TIMEOUT,
-            `Processing timeout (${AgentLoop.MAX_TIME_MS}ms) exceeded`,
-          )
-          logError(timeoutError, 'error', 'AgentLoop')
-          this.session.addMessage('assistant', '处理超时，请简化您的请求。')
-          break
-        }
+        const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
 
-        iteration++
-        hasToolCalls = false
+        this.session.addMessage('assistant', content || '', toolCalls)
+        await this.sessionManager.save(ctx.sessionId)
 
-        try {
-          // 调用 LLM API（带超时）
-          const result = await withTimeout(
-            this.provider.chat({
-              messages: contextMessages,
-              model: this.config.model || this.provider.cfg.model,
-              stream: true,
-              onStreamData: (chunk) => this.handleStreamData(task, chunk),
-              tools,
-              tool_choice: 'auto',
-            }),
-            AgentLoop.LLM_TIMEOUT_MS,
-            'LLM chat',
-          )
+        this.bus.emit('agent:response', {
+          agentId: ctx.agentId,
+          taskId: ctx.taskId,
+          channelId: ctx.channelId,
+          sessionId: ctx.sessionId,
+          content,
+          toolCalls,
+          timestamp: new Date(),
+        })
 
-          // 检查是否需要执行工具调用
-          const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
+        aiResponse = content
+        toolCallsResult = toolCalls
 
-          // 添加助手消息到 session
-          this.session.addMessage('assistant', content || '', toolCalls)
+        if (toolCalls && toolCalls.length > 0) {
+          hasToolCalls = true
 
-          this.bus.emit('agent:response', {
-            agentId: this.config.id,
-            taskId: task.id,
-            channelId: task.channelId,
-            sessionId: task.sessionId,
-            content: content,
-            toolCalls,
-            timestamp: new Date(),
-          })
-          aiResponse = content
-
-          // 保存 session
-          await this.sessionManager.save(task.sessionId)
-
-          if (toolCalls && toolCalls.length > 0) {
-            hasToolCalls = true
-
-            // 发布工具调用事件
-            for (const toolCall of toolCalls) {
-              try {
-                const args = JSON.parse(toolCall.function.arguments)
-                this.bus.emit('agent:tool_call', {
-                  agentId: this.config.id,
-                  taskId: task.id,
-                  channelId: task.channelId,
-                  sessionId: task.sessionId,
-                  toolName: toolCall.function.name,
-                  toolArgs: args,
-                  toolCallId: toolCall.id,
-                  timestamp: new Date(),
-                })
-              } catch (e) {
-                const parseError = new RoxyError(
-                  ErrorCode.TOOL_ARGUMENT_PARSE_ERROR,
-                  `Failed to parse tool arguments for '${toolCall.function.name}'`,
-                  e instanceof Error ? e : undefined,
-                  { rawArguments: toolCall.function.arguments },
-                )
-                logError(parseError, 'warn', 'AgentLoop')
-              }
-            }
-
-            // 执行工具调用
-            const toolResults = await this.toolExecutor.executeTools(
-              toolCalls.map((call) => ({
-                name: call.function.name,
-                arguments: call.function.arguments,
-                id: call.id,
-              })),
-              { channelId: task.channelId, sessionId: task.sessionId },
-            )
-
-            // 发布工具结果事件
-            for (const toolResult of toolResults) {
-              this.bus.emit('agent:tool_result', {
-                agentId: this.config.id,
-                taskId: task.id,
-                channelId: task.channelId,
-                sessionId: task.sessionId,
-                toolName: toolResult.name,
-                toolResult: toolResult.result,
-                toolCallId: toolResult.tool_call_id,
+          for (const toolCall of toolCalls) {
+            try {
+              const args = JSON.parse(toolCall.function.arguments)
+              this.bus.emit('agent:tool_call', {
+                agentId: ctx.agentId,
+                taskId: ctx.taskId,
+                channelId: ctx.channelId,
+                sessionId: ctx.sessionId,
+                toolName: toolCall.function.name,
+                toolArgs: args,
+                toolCallId: toolCall.id,
                 timestamp: new Date(),
               })
-
-              // 添加工具结果到 session 并保存
-              this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
-              await this.sessionManager.save(task.sessionId)
-            }
-
-            // 重新构建上下文
-            contextMessages = await this.context.buildContext(this.session.messages)
-          } else {
-            break
-          }
-        } catch (error) {
-          const roxyError =
-            error instanceof RoxyError
-              ? error
-              : new RoxyError(
-                ErrorCode.LLM_API_ERROR,
-                `AgentLoop iteration ${iteration} failed`,
-                error instanceof Error ? error : undefined,
+            } catch {
+              logError(
+                new RoxyError(ErrorCode.TOOL_ARGUMENT_PARSE_ERROR, 'Failed to parse tool arguments'),
+                'warn',
+                'AgentLoop',
               )
-
-          logError(roxyError, 'warn', 'AgentLoop')
-
-          // 检查是否为可恢复错误
-          if (isRecoverableError(roxyError)) {
-            const retryMsg = `Retrying after error: ${roxyError.message}`
-            log('warn', retryMsg, 'AgentLoop')
-            continue
+            }
           }
 
-          // 致命错误，抛出
+          const toolResults = await this.toolExecutor.executeTools(
+            toolCalls.map((call) => ({
+              name: call.function.name,
+              arguments: call.function.arguments,
+              id: call.id,
+            })),
+            { channelId: ctx.channelId, sessionId: ctx.sessionId },
+          )
+
+          for (const toolResult of toolResults) {
+            this.bus.emit('agent:tool_result', {
+              agentId: ctx.agentId,
+              taskId: ctx.taskId,
+              channelId: ctx.channelId,
+              sessionId: ctx.sessionId,
+              toolName: toolResult.name,
+              toolResult: toolResult.result,
+              toolCallId: toolResult.tool_call_id,
+              timestamp: new Date(),
+            })
+
+            this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
+            await this.sessionManager.save(ctx.sessionId)
+          }
+
+          contextMessages = await this.context.buildContext(this.session.messages)
+        }
+      } catch (error) {
+        const roxyError =
+          error instanceof RoxyError
+            ? error
+            : new RoxyError(ErrorCode.LLM_API_ERROR, `Iteration ${iteration} failed`, error instanceof Error ? error : undefined)
+
+        logError(roxyError, 'warn', 'AgentLoop')
+
+        if (!isRecoverableError(roxyError)) {
           throw roxyError
         }
       }
-
-      // 检查是否达到最大迭代次数
-      if (iteration >= AgentLoop.MAX_ITERATIONS && hasToolCalls) {
-        log('warn', `Reached maximum iteration limit (${AgentLoop.MAX_ITERATIONS})`, 'AgentLoop')
-        this.session.addMessage('assistant', '工具调用次数过多，请简化您的请求。')
-      }
-
-      // 任务完成 - 如果没有发布过响应事件，则发布一个空响应
-      task.status = TaskStatus.COMPLETED
-      task.result = aiResponse
-      task.completedAt = new Date()
-
-    } catch (error) {
-      // 任务失败
-      task.status = TaskStatus.FAILED
-      task.error = error instanceof Error ? error.message : 'Unknown error'
-      task.completedAt = new Date()
-
-      const roxyError =
-        error instanceof RoxyError
-          ? error
-          : new RoxyError(
-            ErrorCode.SYSTEM_ERROR,
-            'AgentLoop.executeTask failed',
-            error instanceof Error ? error : undefined,
-          )
-
-      logError(roxyError, 'error', 'AgentLoop')
-
-      // 发布错误事件
-      this.bus.emit('error', {
-        agentId: this.config.id,
-        taskId: task.id,
-        sessionId: task.sessionId,
-        channelId: task.channelId,
-        error: roxyError,
-        timestamp: new Date(),
-      })
-
-      // 抛出错误
-      throw roxyError
     }
+
+    if (iteration >= AgentLoop.MAX_ITERATIONS && hasToolCalls) {
+      log('warn', `Max iterations reached`, 'AgentLoop')
+      this.session.addMessage('assistant', '工具调用次数过多')
+    }
+
+    return { content: aiResponse, toolCalls: toolCallsResult }
   }
 
-  /**
-   * 处理流式数据
-   */
-  private handleStreamData(task: AgentTask, chunk: string): void {
+  private handleStreamData(ctx: RunContext, chunk: string): void {
     this.bus.emit('agent:stream', {
-      agentId: this.config.id,
-      taskId: task.id,
-      channelId: task.channelId,
-      sessionId: task.sessionId,
+      agentId: ctx.agentId,
+      taskId: ctx.taskId,
+      channelId: ctx.channelId,
+      sessionId: ctx.sessionId,
       chunk,
       timestamp: new Date(),
     })
   }
 
-  /**
-   * 获取或创建会话
-   */
-  private async getOrCreateSession(sessionId: string): Promise<Session> {
-    return this.sessionManager.getOrCreate(sessionId)
-  }
-
-  /**
-   * 获取当前会话
-   */
   getSession(): Session | null {
     return this.session
   }
+}
 
-  /**
-   * 处理直接调用（向后兼容）
-   * @deprecated 使用事件驱动方式代替
-   */
-  async process(task: AgentTask): Promise<string> {
-    await this.executeTask(task)
-    return task.result || ''
-  }
+function isRecoverableError(error: Error): boolean {
+  const recoverableMessages = ['network', 'timeout', 'rate limit', 'too many requests', 'service unavailable', 'gateway']
+  return recoverableMessages.some((keyword) => error.message.toLowerCase().includes(keyword))
 }

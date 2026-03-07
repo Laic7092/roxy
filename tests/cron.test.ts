@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { CronService, CronJobType } from '../src/cron/CronService'
-import { EventBus } from '../src/bus/instance'
 
 describe('CronService', () => {
   let cronService: CronService
-  let eventBus: EventBus
 
   beforeEach(() => {
-    eventBus = new EventBus()
-    cronService = new CronService('test-workspace', eventBus)
+    cronService = new CronService('test-workspace', {
+      onTrigger: () => {
+        // Mock callback for tests
+      },
+    })
   })
 
   afterEach(async () => {
@@ -65,12 +66,10 @@ describe('CronService', () => {
   it('should pause and resume a job', async () => {
     const job = await cronService.addJob('Test', 'session', 'channel', { intervalSeconds: 60 })
 
-    // Pause
     const paused = await cronService.pauseJob(job.id)
     expect(paused).toBe(true)
     expect(job.active).toBe(false)
 
-    // Resume
     const resumed = await cronService.resumeJob(job.id)
     expect(resumed).toBe(true)
     expect(job.active).toBe(true)

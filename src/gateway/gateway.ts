@@ -4,13 +4,14 @@ import { ToolExecutor } from '../tools/ToolExecutor'
 import { AgentLoop } from '../agent/loop'
 import { ContextMng } from '../agent/context'
 import { LiteLLMProvider } from '../provider/llm'
-import type { AgentConfig, AgentTask } from '../agent/types'
-import { TaskStatus, AgentRole } from '../agent/types'
+import type { AgentConfig } from '../agent/types'
+import { AgentRole } from '../agent/types'
 import type { GatewayConfig, GatewayDeps, GatewayInput, GatewayOutput, GatewayEventHandler } from './types'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { v4 as uuidv4 } from 'uuid'
 import { loadConfig } from '../config/manager'
+import { SubAgentManager } from '../agent/subAgent'
 
 /**
  * Roxy Gateway - 统一服务入口
@@ -19,56 +20,31 @@ import { loadConfig } from '../config/manager'
  * - 组装所有核心模块
  * - 提供统一的 API 接口
  * - 管理模块生命周期
- * - 直接管理 Agent（无需 Factory/Orchestrator）
- *
- * 架构原则：
- * - Channel: 只负责 send/receive msg
- * - EventBus: 只负责 inbound/outbound msg (纯粹的事件总线)
- * - AgentLoop: 高内聚低耦合，依赖注入
- * - Gateway: 引入所有模块，作为服务入口
  */
 export class RoxyGateway {
-  // 核心组件
   private readonly bus: Bus
   private readonly sessionManager: SessionManager
   private readonly toolExecutor: ToolExecutor
   private provider: LiteLLMProvider | null = null
+  private subAgentManager: SubAgentManager | null = null
 
-  // Agent 管理
   private readonly agents: Map<string, AgentLoop> = new Map()
-  private readonly tasks: Map<string, AgentTask> = new Map()
 
-  // 配置
   private readonly config: GatewayConfig
-
-  // 运行状态
   private _running = false
   private eventHandlers: Map<string, Set<GatewayEventHandler>> = new Map()
 
-  // 默认 Agent ID
   private readonly defaultAgentId = 'main-agent'
 
   constructor(deps: GatewayDeps) {
     this.config = deps.config
-
-    // 1. 创建 Bus (纯粹的事件总线)
     this.bus = getBus()
-
-    // 2. 创建 SessionManager
     this.sessionManager = new SessionManager(deps.config.sessionDir)
-
-    // 3. 创建 ToolExecutor
     this.toolExecutor = new ToolExecutor(deps.config.workspace)
-
-    // 4. 设置事件订阅
     this.setupEventSubscriptions()
   }
 
-  /**
-   * 设置事件订阅
-   */
   private setupEventSubscriptions(): void {
-    // Gateway 订阅所有输出事件，分发给注册的处理器
     this.bus.on('agent:response', (event) => {
       this.dispatchOutput({
         type: 'response',
@@ -114,7 +90,6 @@ export class RoxyGateway {
       })
     })
 
-    // 监听 SubAgent 事件
     this.bus.on('subagent:start', (event) => {
       this.dispatchOutput({
         type: 'subagent_start',
@@ -143,55 +118,35 @@ export class RoxyGateway {
       })
     })
 
-    // 监听用户消息，路由到 Agent
     this.bus.on('user:message', async (event) => {
       await this.handleUserMessage(event)
     })
   }
 
-  /**
-   * 处理用户消息
-   */
   private async handleUserMessage(event: any): Promise<void> {
     const { channelId, sessionId, content } = event
 
     try {
-      // 路由到默认 Agent
       const agentId = this.defaultAgentId
+      const taskId = uuidv4()
 
-      // 创建任务
-      const task: AgentTask = {
-        id: uuidv4(),
+      // 发布任务执行事件（使用新的 RunContext 格式）
+      this.bus.emit('agent:execute', {
+        taskId,
         agentId,
-        content,
-        sessionId,
         channelId,
-        status: TaskStatus.PENDING,
-        createdAt: new Date(),
-      }
-
-      // 保存任务
-      this.tasks.set(task.id, task)
-
-      // 动态注册上下文相关工具（CronTool、SpawnTool）
-      await this.registerContextualTools(channelId, sessionId)
-
-      // 发布任务执行事件
-      this.bus.emit('agent:execute', { task })
+        sessionId,
+        content,
+      })
     } catch (error) {
       logError(
         error instanceof RoxyError
           ? error
-          : new RoxyError(
-              ErrorCode.SYSTEM_ERROR,
-              'Failed to handle user message',
-              error instanceof Error ? error : undefined,
-            ),
+          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to handle user message', error instanceof Error ? error : undefined),
         'error',
         'RoxyGateway',
       )
 
-      // 发布错误事件
       this.bus.emit('error', {
         channelId,
         sessionId,
@@ -201,9 +156,6 @@ export class RoxyGateway {
     }
   }
 
-  /**
-   * 分发消息输出到注册的处理器
-   */
   private dispatchOutput(output: GatewayOutput): void {
     const handlers = this.eventHandlers.get(output.channelId)
     if (handlers) {
@@ -213,9 +165,6 @@ export class RoxyGateway {
     }
   }
 
-  /**
-   * 注册事件处理器
-   */
   on(channelId: string, handler: GatewayEventHandler): void {
     if (!this.eventHandlers.has(channelId)) {
       this.eventHandlers.set(channelId, new Set())
@@ -223,9 +172,6 @@ export class RoxyGateway {
     this.eventHandlers.get(channelId)!.add(handler)
   }
 
-  /**
-   * 注销事件处理器
-   */
   off(channelId: string, handler: GatewayEventHandler): void {
     const handlers = this.eventHandlers.get(channelId)
     if (handlers) {
@@ -233,13 +179,9 @@ export class RoxyGateway {
     }
   }
 
-  /**
-   * 接收消息 (Channel → Gateway)
-   */
   async receive(input: GatewayInput): Promise<void> {
     log('debug', `Gateway received message from ${input.channelId}`, 'RoxyGateway')
 
-    // 发布用户消息事件到 Bus
     this.bus.emit('user:message', {
       channelId: input.channelId,
       sessionId: input.sessionId,
@@ -248,81 +190,17 @@ export class RoxyGateway {
     })
   }
 
-  /**
-   * 初始化 Gateway（异步）
-   */
   async initialize(): Promise<void> {
     log('info', 'Initializing Roxy Gateway...', 'RoxyGateway')
 
-    // 1. 初始化工具执行器
     await this.toolExecutor.initialize()
+    await this.registerAllTools()
 
-    // 2. 注册基础工具
-    await this.registerBaseTools()
-
-    // 3. 加载配置并创建 Provider
     const providerConfig = await this.loadProviderConfig()
     this.provider = new LiteLLMProvider(providerConfig)
 
-    // 4. 创建默认 Agent
-    await this.createAgent({
-      id: this.defaultAgentId,
-      role: AgentRole.MAIN,
-    })
-
-    this._running = true
-    log('info', 'Roxy Gateway initialized', 'RoxyGateway')
-  }
-
-  /**
-   * 注册基础工具（文件系统、命令执行、技能等）
-   */
-  private async registerBaseTools(): Promise<void> {
-    // 导入基础工具
-    const { fileSystemTools } = await import('../tools/FileSystemTools')
-    const { commandTools } = await import('../tools/CommandTools')
-    const { skillTools } = await import('../tools/SkillTools')
-
-    // 注册工具
-    this.toolExecutor.registerTools([...fileSystemTools, ...commandTools, ...skillTools])
-
-    log('info', `Registered ${fileSystemTools.length + commandTools.length + skillTools.length} base tool(s)`, 'RoxyGateway')
-  }
-
-  /**
-   * 注册需要上下文的工具（CronTool、SpawnTool）
-   * 这些工具需要在每次处理用户消息时动态注册
-   */
-  async registerContextualTools(channelId: string, sessionId: string): Promise<void> {
-    // 确保 Provider 已初始化
-    if (!this.provider) {
-      throw new RoxyError(ErrorCode.SYSTEM_ERROR, 'Provider not initialized')
-    }
-
-    // 清除旧的上下文工具（保留基础工具）
-    // 基础工具：readFile, writeFile, listDir, getWorkspace, executeCommand, load_skill
-    const baseTools = ['readFile', 'writeFile', 'listDir', 'getWorkspace', 'executeCommand', 'load_skill']
-    for (const toolName of this.toolExecutor.getToolNames()) {
-      if (!baseTools.includes(toolName)) {
-        this.toolExecutor.unregisterTool(toolName)
-      }
-    }
-
-    // 导入工具
-    const { createCronTools } = await import('../tools/CronTool')
-    const { createSpawnTools } = await import('../tools/SpawnTool')
-    const { SubAgentManager } = await import('../agent/subAgent')
-
-    // 创建 CronTool（需要 Bus）
-    const cronTools = createCronTools({
-      sessionId,
-      channelId,
-      workspace: this.config.workspace,
-      bus: this.bus,
-    })
-
-    // 创建 SubAgentManager 和 SpawnTool（通过回调发布事件）
-    const subAgentManager = new SubAgentManager({
+    // 创建 SubAgentManager
+    this.subAgentManager = new SubAgentManager({
       provider: this.provider,
       sessionManager: this.sessionManager,
       toolExecutor: this.toolExecutor,
@@ -351,20 +229,54 @@ export class RoxyGateway {
       },
     })
 
-    const spawnTools = createSpawnTools(subAgentManager, {
-      channelId,
-      sessionId,
+    // 注册 SpawnTool（需要 SubAgentManager）
+    await this.registerSpawnTool()
+
+    await this.createAgent({
+      id: this.defaultAgentId,
+      role: AgentRole.MAIN,
     })
 
-    // 注册工具
-    this.toolExecutor.registerTools([...cronTools, ...spawnTools])
-
-    log('debug', `Registered contextual tools for channel ${channelId} (total: ${this.toolExecutor.getToolCount()} tools)`, 'RoxyGateway')
+    this._running = true
+    log('info', 'Roxy Gateway initialized', 'RoxyGateway')
   }
 
   /**
-   * 加载 Provider 配置
+   * 一次性注册所有工具
    */
+  private async registerAllTools(): Promise<void> {
+    const { fileSystemTools } = await import('../tools/FileSystemTools')
+    const { commandTools } = await import('../tools/CommandTools')
+    const { skillTools } = await import('../tools/SkillTools')
+    const { createCronTools } = await import('../tools/CronTool')
+
+    // 基础工具
+    this.toolExecutor.registerTools([...fileSystemTools, ...commandTools, ...skillTools])
+
+    // CronTool（全局单例，执行时获取上下文）
+    const cronTools = createCronTools(this.config.workspace, this.bus)
+    this.toolExecutor.registerTools([...cronTools])
+
+    // SpawnTool 需要 SubAgentManager，等创建后再注册
+    log('info', `Registered ${this.toolExecutor.getToolCount()} tool(s)`, 'RoxyGateway')
+  }
+
+  /**
+   * 注册 SpawnTool（需要 SubAgentManager）
+   */
+  private async registerSpawnTool(): Promise<void> {
+    if (!this.subAgentManager) {
+      log('warn', 'SubAgentManager not initialized, skipping SpawnTool registration', 'RoxyGateway')
+      return
+    }
+
+    const { createSpawnTools } = await import('../tools/SpawnTool')
+    const spawnTools = createSpawnTools(this.subAgentManager)
+    this.toolExecutor.registerTools([...spawnTools])
+
+    log('debug', 'Registered SpawnTool', 'RoxyGateway')
+  }
+
   private async loadProviderConfig(): Promise<any> {
     try {
       const config = await loadConfig()
@@ -372,18 +284,10 @@ export class RoxyGateway {
       const modelName = config.agents.defaults.model.split('/')[1]
       const { apiKey, baseURL } = config.providers[providerName]
 
-      return {
-        apiKey,
-        baseURL,
-        model: modelName,
-      }
+      return { apiKey, baseURL, model: modelName }
     } catch (error) {
       logError(
-        new RoxyError(
-          ErrorCode.CONFIG_ERROR,
-          'Failed to load provider config',
-          error instanceof Error ? error : undefined,
-        ),
+        new RoxyError(ErrorCode.CONFIG_ERROR, 'Failed to load provider config', error instanceof Error ? error : undefined),
         'error',
         'RoxyGateway',
       )
@@ -391,25 +295,18 @@ export class RoxyGateway {
     }
   }
 
-  /**
-   * 创建 Agent
-   */
   private async createAgent(config: AgentConfig): Promise<AgentLoop> {
-    // 如果已存在，直接返回
     const existing = this.agents.get(config.id)
     if (existing) {
       return existing
     }
 
-    // 确保 Provider 已初始化
     if (!this.provider) {
-      throw new RoxyError(ErrorCode.SYSTEM_ERROR, 'Provider not initialized. Call initialize() first.')
+      throw new RoxyError(ErrorCode.SYSTEM_ERROR, 'Provider not initialized')
     }
 
-    // 创建 Context
     const ctx = new ContextMng(this.config.workspace, true)
 
-    // 创建 Agent
     const agent = new AgentLoop({
       config,
       provider: this.provider,
@@ -419,16 +316,11 @@ export class RoxyGateway {
       sessionManager: this.sessionManager,
     })
 
-    // 保存引用
     this.agents.set(config.id, agent)
-
     log('debug', `Agent created: ${config.id}`, 'RoxyGateway')
     return agent
   }
 
-  /**
-   * 启动 Gateway
-   */
   async start(): Promise<void> {
     if (this._running) {
       log('warn', 'Gateway is already running', 'RoxyGateway')
@@ -439,9 +331,6 @@ export class RoxyGateway {
     log('info', 'Roxy Gateway started', 'RoxyGateway')
   }
 
-  /**
-   * 停止 Gateway
-   */
   async stop(): Promise<void> {
     if (!this._running) {
       return
@@ -449,28 +338,18 @@ export class RoxyGateway {
 
     log('info', 'Stopping Roxy Gateway...', 'RoxyGateway')
 
-    // 清理所有 Agent
     await this.destroyAllAgents()
-
-    // 清除任务
-    this.tasks.clear()
-
-    // 清除事件处理器
     this.eventHandlers.clear()
 
     this._running = false
     log('info', 'Roxy Gateway stopped', 'RoxyGateway')
   }
 
-  /**
-   * 销毁所有 Agent
-   */
   private async destroyAllAgents(): Promise<void> {
     for (const agentId of this.agents.keys()) {
       await this.destroyAgent(agentId)
     }
 
-    // 清理 Cron 服务
     try {
       const { clearAllCronServices } = await import('../tools/CronTool')
       await clearAllCronServices()
@@ -479,9 +358,6 @@ export class RoxyGateway {
     }
   }
 
-  /**
-   * 销毁 Agent
-   */
   private async destroyAgent(agentId: string): Promise<boolean> {
     const agent = this.agents.get(agentId)
     if (agent) {
@@ -492,37 +368,22 @@ export class RoxyGateway {
     return false
   }
 
-  /**
-   * 获取运行状态
-   */
   get isRunning(): boolean {
     return this._running
   }
 
-  /**
-   * 获取 Bus 实例 (仅供内部使用)
-   */
   getBus(): Bus {
     return this.bus
   }
 
-  /**
-   * 获取 SessionManager 实例 (仅供内部使用)
-   */
   getSessionManager(): SessionManager {
     return this.sessionManager
   }
 
-  /**
-   * 获取 ToolExecutor 实例 (仅供内部使用)
-   */
   getToolExecutor(): ToolExecutor {
     return this.toolExecutor
   }
 
-  /**
-   * 获取 Provider 实例 (仅供内部使用)
-   */
   getProvider(): LiteLLMProvider | null {
     return this.provider
   }

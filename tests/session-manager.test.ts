@@ -39,14 +39,11 @@ describe('SessionManager', () => {
     const sessionId = 'test-save-load'
     const session = await manager.getOrCreate(sessionId)
 
-    // 添加一些消息
     session.addMessage('user', 'Hello')
     session.addMessage('assistant', 'Hi there!')
 
-    // 保存会话
-    await manager.save(session)
+    await manager.save(sessionId)
 
-    // 创建一个新的管理器实例来模拟重新加载
     const newManager = new SessionManager(testSessionDir)
     const loadedSession = await newManager.getOrCreate(sessionId)
 
@@ -61,15 +58,12 @@ describe('SessionManager', () => {
     const sessionId = 'test-incremental'
     const session = await manager.getOrCreate(sessionId)
 
-    // 添加第一条消息并保存
     session.addMessage('user', 'First message')
-    await manager.save(session)
+    await manager.save(sessionId)
 
-    // 添加第二条消息并保存
     session.addMessage('assistant', 'Second message')
-    await manager.save(session)
+    await manager.save(sessionId)
 
-    // 读取文件内容验证是否正确追加
     const filePath = join(testSessionDir, `${sessionId}.jsonl`)
     const content = await readFile(filePath, 'utf-8')
     const lines = content.trim().split('\n').filter(Boolean)
@@ -86,11 +80,11 @@ describe('SessionManager', () => {
   })
 
   it('should handle empty session correctly', async () => {
-    const session = await manager.getOrCreate('empty-session')
+    const sessionId = 'empty-session'
+    const session = await manager.getOrCreate(sessionId)
     expect(session.messages).toHaveLength(0)
 
-    // 尝试保存空会话不应该出错
-    await manager.save(session)
+    await manager.save(sessionId)
     expect(session.messages).toHaveLength(0)
   })
 

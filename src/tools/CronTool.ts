@@ -2,33 +2,45 @@ import { CronService, CronJobType, type CronCallbacks } from '../cron/CronServic
 import type { Bus } from '../bus/instance'
 
 /**
- * CronTool 执行上下文
+ * 全局 CronService 单例
  */
-export interface CronContext {
-  sessionId: string
-  channelId: string
-  workspace: string
-  bus: Bus
+let globalCronService: CronService | null = null
+
+/**
+ * 获取或创建全局 CronService 单例
+ */
+export function getCronService(workspace: string, bus: Bus): CronService {
+  if (!globalCronService) {
+    const callbacks: CronCallbacks = {
+      onTrigger: (sessionId, channelId, content) => {
+        bus.emit('user:message', {
+          channelId,
+          sessionId,
+          content,
+          timestamp: new Date(),
+        })
+      },
+    }
+    globalCronService = new CronService(workspace, callbacks)
+  }
+  return globalCronService
 }
 
 /**
- * 创建 CronTool 实例（工厂函数）
+ * 清除全局 CronService（用于测试或重启）
  */
-export function createCronTools(context: CronContext) {
-  // 创建回调：通过 Gateway 发布 user:message 事件
-  const callbacks: CronCallbacks = {
-    onTrigger: (sessionId, channelId, content) => {
-      context.bus.emit('user:message', {
-        channelId,
-        sessionId,
-        content,
-        timestamp: new Date(),
-      })
-    },
+export async function clearAllCronServices(): Promise<void> {
+  if (globalCronService) {
+    await globalCronService.clearAll()
+    globalCronService = null
   }
+}
 
-  const cronService = new CronService(context.workspace, callbacks)
-
+/**
+ * 创建 CronTool（工厂函数）
+ * 工具执行时从上下文中获取 sessionId/channelId
+ */
+export function createCronTools(workspace: string, bus: Bus) {
   return [
     {
       name: 'cron',
@@ -86,8 +98,15 @@ export function createCronTools(context: CronContext) {
           job_id?: string
           type?: string
         },
+        _workspace: string,
+        context?: { channelId: string; sessionId: string },
       ) => {
         const action = args.action?.toLowerCase() || 'add'
+        const cronService = getCronService(workspace, bus)
+
+        // 使用执行时的上下文，而非注册时的上下文
+        const sessionId = context?.sessionId || 'unknown'
+        const channelId = context?.channelId || 'unknown'
 
         switch (action) {
           case 'add': {
@@ -103,7 +122,7 @@ export function createCronTools(context: CronContext) {
             }
 
             const jobType = parseJobType(args.message, args.type)
-            const job = await cronService.addJob(args.message, context.sessionId, context.channelId, {
+            const job = await cronService.addJob(args.message, sessionId, channelId, {
               type: jobType,
               cronExpr: args.cron_expr,
               intervalSeconds: args.every_seconds,

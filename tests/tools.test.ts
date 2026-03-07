@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ToolExecutor } from '../src/tools/ToolExecutor'
+import { fileSystemTools } from '../src/tools/FileSystemTools'
 
 describe('ToolExecutor', () => {
   let toolExecutor: ToolExecutor
 
-  beforeEach(() => {
-    // 使用一个模拟的工作空间路径
+  beforeEach(async () => {
     toolExecutor = new ToolExecutor('/mock/workspace')
+    await toolExecutor.initialize()
+    // 注册基础工具
+    toolExecutor.registerTools([...fileSystemTools])
   })
 
   it('should return tool definitions', async () => {
@@ -16,7 +19,6 @@ describe('ToolExecutor', () => {
     expect(Array.isArray(tools)).toBe(true)
     expect(tools.length).toBeGreaterThan(0)
 
-    // 检查是否包含预期的工具
     const toolNames = tools.map((tool) => tool.function.name)
     expect(toolNames).toContain('readFile')
     expect(toolNames).toContain('writeFile')
@@ -25,7 +27,6 @@ describe('ToolExecutor', () => {
   })
 
   it('should execute readFile tool', async () => {
-    // 我们不能真正测试文件读取，但可以检查工具是否被正确注册
     const tools = await toolExecutor.getToolDefinitions()
     const readFileTool = tools.find((tool) => tool.function.name === 'readFile')
 

@@ -7,17 +7,10 @@
 import type { SubAgentManager } from '../agent/subAgent'
 
 /**
- * SpawnTool 执行上下文
+ * 创建 SpawnTool（工厂函数）
+ * 工具执行时从上下文中获取 sessionId/channelId
  */
-export interface SpawnContext {
-  channelId: string
-  sessionId: string
-}
-
-/**
- * 创建 SpawnTool 实例（工厂函数）
- */
-export function createSpawnTools(manager: SubAgentManager, context: SpawnContext) {
+export function createSpawnTools(manager: SubAgentManager) {
   return [
     {
       name: 'spawn',
@@ -39,10 +32,16 @@ export function createSpawnTools(manager: SubAgentManager, context: SpawnContext
         },
         required: ['task'],
       },
-      execute: async (args: { task: string; label?: string }) => {
+      execute: async (
+        args: { task: string; label?: string },
+        _workspace: string,
+        context?: { channelId: string; sessionId: string },
+      ) => {
         try {
           const { task, label } = args
-          const result = await manager.spawn(task, label, context.channelId, context.sessionId)
+          const sessionId = context?.sessionId || 'unknown'
+          const channelId = context?.channelId || 'unknown'
+          const result = await manager.spawn(task, label, channelId, sessionId)
           return { success: true, message: result }
         } catch (error) {
           return {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { ToolExecutor } from '../src/tools/ToolExecutor'
+import { fileSystemTools } from '../src/tools/FileSystemTools'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -15,132 +16,135 @@ describe('ToolExecutor FileSystem Operations', () => {
   })
 
   afterEach(() => {
-    // 清理临时目录
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
   it('should execute readFile tool', async () => {
-    // 创建一个测试文件在工作空间内
     const testFilePath = path.join(workspaceDir, 'test.txt')
     const testContent = 'Hello, this is a test file!'
     fs.writeFileSync(testFilePath, testContent, 'utf-8')
 
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行readFile工具（使用相对于工作空间的路径）
     const result = await toolExecutor.executeTool('readFile', { filePath: 'test.txt' })
 
+    console.log('readFile result:', result)
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(true)
-    expect(result.result.content).toBe(testContent)
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(true)
+    expect(parsedResult.content).toBe(testContent)
   })
 
   it('should execute writeFile tool', async () => {
-    const testFilePath = 'write-test.txt' // 相对于工作空间的路径
+    const testFilePath = 'write-test.txt'
     const testContent = 'This is content written by writeFile tool'
 
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行writeFile工具
     const result = await toolExecutor.executeTool('writeFile', {
       filePath: testFilePath,
       content: testContent,
     })
 
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(true)
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(true)
 
-    // 验证文件是否已创建且内容正确
     const fullFilePath = path.join(workspaceDir, testFilePath)
     const fileContent = fs.readFileSync(fullFilePath, 'utf-8')
     expect(fileContent).toBe(testContent)
   })
 
   it('should execute listDir tool', async () => {
-    // 在工作空间中创建一些文件
     fs.writeFileSync(path.join(workspaceDir, 'file1.txt'), 'content1', 'utf-8')
     fs.writeFileSync(path.join(workspaceDir, 'file2.txt'), 'content2', 'utf-8')
     fs.mkdirSync(path.join(workspaceDir, 'subdir'))
 
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行listDir工具
-    const result = await toolExecutor.executeTool('listDir', { dirPath: '.' }) // 相对于工作空间的路径
+    const result = await toolExecutor.executeTool('listDir', { dirPath: '.' })
 
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(true)
-    expect(Array.isArray(result.result.files)).toBe(true)
-    expect(result.result.files).toContain('file1.txt')
-    expect(result.result.files).toContain('file2.txt')
-    expect(result.result.files).toContain('subdir')
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(true)
+    expect(Array.isArray(parsedResult.files)).toBe(true)
+    expect(parsedResult.files).toContain('file1.txt')
+    expect(parsedResult.files).toContain('file2.txt')
+    expect(parsedResult.files).toContain('subdir')
   })
 
   it('should execute getWorkspace tool', async () => {
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行getWorkspace工具
     const result = await toolExecutor.executeTool('getWorkspace', {})
 
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(true)
-    expect(result.result.workspace).toBe(workspaceDir)
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(true)
+    expect(parsedResult.workspace).toBe(workspaceDir)
   })
 
   it('should handle errors when reading non-existent file', async () => {
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行readFile工具尝试读取不存在的文件
     const result = await toolExecutor.executeTool('readFile', {
       filePath: 'non-existent-file.txt',
     })
 
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(false)
-    expect(result.result.error).toBeDefined()
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(false)
+    expect(parsedResult.error).toBeDefined()
   })
 
   it('should prevent path traversal attacks', async () => {
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 尝试使用路径遍历访问工作空间外的文件
     const result = await toolExecutor.executeTool('readFile', { filePath: '../etc/passwd' })
 
     expect(result).toHaveProperty('result')
-    expect(result.result.success).toBe(false)
-    expect(result.result.error).toContain('Access denied')
+    const parsedResult = JSON.parse(result.result as string)
+    expect(parsedResult.success).toBe(false)
+    expect(parsedResult.error).toContain('Access denied')
   })
 
   it('should execute multiple tools in sequence', async () => {
-    // 创建ToolExecutor实例，使用临时工作空间
     const toolExecutor = new ToolExecutor(workspaceDir)
+    await toolExecutor.initialize()
+    toolExecutor.registerTools([...fileSystemTools])
 
-    // 执行一系列工具调用
-    const toolsToExecute = [
-      { name: 'getWorkspace', arguments: {} },
-      { name: 'writeFile', arguments: { filePath: 'multi-test.txt', content: 'Multi-tool test' } },
-      { name: 'readFile', arguments: { filePath: 'multi-test.txt' } },
-    ]
+    // 先写入文件
+    const writeResult = await toolExecutor.executeTool('writeFile', {
+      filePath: 'multi-test.txt',
+      content: 'Multi-tool test',
+    })
+    const parsedWrite = JSON.parse(writeResult.result as string)
+    expect(parsedWrite.success).toBe(true)
 
-    const results = await toolExecutor.executeTools(toolsToExecute)
+    // 然后读取文件
+    const readResult = await toolExecutor.executeTool('readFile', {
+      filePath: 'multi-test.txt',
+    })
+    const parsedRead = JSON.parse(readResult.result as string)
+    expect(parsedRead.success).toBe(true)
+    expect(parsedRead.content).toBe('Multi-tool test')
 
-    expect(results).toHaveLength(3)
-
-    // 检查每个结果
-    expect(results[0].name).toBe('getWorkspace')
-    expect(results[0].result.success).toBe(true)
-    expect(results[0].result.workspace).toBe(workspaceDir)
-
-    expect(results[1].name).toBe('writeFile')
-    expect(results[1].result.success).toBe(true)
-
-    expect(results[2].name).toBe('readFile')
-    expect(results[2].result.success).toBe(true)
-    expect(results[2].result.content).toBe('Multi-tool test')
+    // 最后获取工作空间
+    const workspaceResult = await toolExecutor.executeTool('getWorkspace', {})
+    const parsedWorkspace = JSON.parse(workspaceResult.result as string)
+    expect(parsedWorkspace.success).toBe(true)
+    expect(parsedWorkspace.workspace).toBe(workspaceDir)
   })
 })
