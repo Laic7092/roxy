@@ -2,45 +2,12 @@ import { CronService, CronJobType, type CronCallbacks } from '../cron/CronServic
 import type { Bus } from '../bus/instance'
 
 /**
- * 全局 CronService 单例
- */
-let globalCronService: CronService | null = null
-
-/**
- * 获取或创建全局 CronService 单例
- */
-export function getCronService(workspace: string, bus: Bus): CronService {
-  if (!globalCronService) {
-    const callbacks: CronCallbacks = {
-      onTrigger: (sessionId, channelId, content) => {
-        bus.emit('user:message', {
-          channelId,
-          sessionId,
-          content,
-          timestamp: new Date(),
-        })
-      },
-    }
-    globalCronService = new CronService(workspace, callbacks)
-  }
-  return globalCronService
-}
-
-/**
- * 清除全局 CronService（用于测试或重启）
- */
-export async function clearAllCronServices(): Promise<void> {
-  if (globalCronService) {
-    await globalCronService.clearAll()
-    globalCronService = null
-  }
-}
-
-/**
  * 创建 CronTool（工厂函数）
- * 工具执行时从上下文中获取 sessionId/channelId
+ * 
+ * @param cronService - CronService 实例（由 Gateway 注入）
+ * @param bus - 事件总线（用于回调）
  */
-export function createCronTools(workspace: string, bus: Bus) {
+export function createCronTools(cronService: CronService, bus: Bus) {
   return [
     {
       name: 'cron',
@@ -56,14 +23,14 @@ export function createCronTools(workspace: string, bus: Bus) {
           },
           message: {
             type: 'string',
-            description: 'Message content for the reminder or task',
+            description: 'Message content for the reminder or task (required for "add" action)',
           },
-          every_seconds: {
+          everySeconds: {
             type: 'number',
             description: 'Interval in seconds (e.g., 600 for every 10 minutes)',
             minimum: 1,
           },
-          cron_expr: {
+          cronExpr: {
             type: 'string',
             description: 'Cron expression (e.g., "0 8 * * *" for daily at 8am)',
           },
@@ -75,9 +42,9 @@ export function createCronTools(workspace: string, bus: Bus) {
             type: 'string',
             description: 'Timezone in IANA format (e.g., "America/Vancouver")',
           },
-          job_id: {
+          jobId: {
             type: 'string',
-            description: 'Job ID for remove/pause/resume actions',
+            description: 'Job ID for remove/pause/resume actions (required for those actions)',
           },
           type: {
             type: 'string',
@@ -91,18 +58,17 @@ export function createCronTools(workspace: string, bus: Bus) {
         args: {
           action?: string
           message?: string
-          every_seconds?: number
-          cron_expr?: string
+          everySeconds?: number
+          cronExpr?: string
           at?: string
           tz?: string
-          job_id?: string
+          jobId?: string
           type?: string
         },
         _workspace: string,
         context?: { channelId: string; sessionId: string },
       ) => {
         const action = args.action?.toLowerCase() || 'add'
-        const cronService = getCronService(workspace, bus)
 
         // 使用执行时的上下文，而非注册时的上下文
         const sessionId = context?.sessionId || 'unknown'
@@ -114,86 +80,82 @@ export function createCronTools(workspace: string, bus: Bus) {
               return { success: false, error: 'Message is required for adding a job' }
             }
 
-            if (!args.every_seconds && !args.cron_expr && !args.at) {
+            if (!args.everySeconds && !args.cronExpr && !args.at) {
               return {
                 success: false,
-                error: 'Must provide either every_seconds, cron_expr, or at',
+                error: 'Must provide either everySeconds, cronExpr, or at',
               }
             }
 
             const jobType = parseJobType(args.message, args.type)
             const job = await cronService.addJob(args.message, sessionId, channelId, {
               type: jobType,
-              cronExpr: args.cron_expr,
-              intervalSeconds: args.every_seconds,
+              cronExpr: args.cronExpr,
+              intervalSeconds: args.everySeconds,
               at: args.at,
               timezone: args.tz,
             })
 
             return {
               success: true,
-              result: {
-                job_id: job.id,
-                type: job.type,
-                next_execution: job.nextExecution?.toISOString(),
-                message: `Scheduled ${job.type}: "${truncate(args.message, 50)}"`,
-              },
+              jobId: job.id,
+              type: job.type,
+              nextExecution: job.nextExecution?.toISOString(),
+              message: `Scheduled ${job.type}: "${truncate(args.message, 50)}"`,
             }
           }
 
           case 'list': {
             const jobs = await cronService.listJobs()
             if (jobs.length === 0) {
-              return { success: true, result: { jobs: [], message: 'No scheduled jobs' } }
+              return { success: true, message: 'No scheduled jobs' }
             }
 
             return {
               success: true,
-              result: {
-                jobs: jobs.map((job) => ({
-                  id: job.id,
-                  type: job.type,
-                  message: truncate(job.message, 50),
-                  active: job.active,
-                  execution_count: job.executionCount,
-                  last_execution: job.lastExecution?.toISOString(),
-                  next_execution: job.nextExecution?.toISOString(),
-                  cron_expr: job.cronExpr,
-                  interval_seconds: job.intervalSeconds,
-                  timezone: job.timezone,
-                })),
-              },
+              jobs: jobs.map((job) => ({
+                id: job.id,
+                type: job.type,
+                message: truncate(job.message, 50),
+                active: job.active,
+                executionCount: job.executionCount,
+                lastExecution: job.lastExecution?.toISOString(),
+                nextExecution: job.nextExecution?.toISOString(),
+                cronExpr: job.cronExpr,
+                intervalSeconds: job.intervalSeconds,
+                timezone: job.timezone,
+              })),
             }
           }
 
           case 'remove': {
-            if (!args.job_id) {
-              return { success: false, error: 'job_id is required for removal' }
+            if (!args.jobId) {
+              return { success: false, error: 'jobId is required for removal' }
             }
-            const removed = await cronService.removeJob(args.job_id)
+            const removed = await cronService.removeJob(args.jobId)
             return removed
-              ? { success: true, result: { message: `Job ${args.job_id} removed` } }
-              : { success: false, error: `Job ${args.job_id} not found` }
+              ? { success: true, message: `Job ${args.jobId} removed` }
+              : { success: false, error: `Job ${args.jobId} not found` }
           }
 
           case 'pause': {
-            if (!args.job_id) {
-              return { success: false, error: 'job_id is required for pausing' }
+            if (!args.jobId) {
+              return { success: false, error: 'jobId is required for pausing' }
             }
-            const paused = await cronService.pauseJob(args.job_id)
+            const paused = await cronService.pauseJob(args.jobId)
             return paused
-              ? { success: true, result: { message: `Job ${args.job_id} paused` } }
-              : { success: false, error: `Job ${args.job_id} not found` }
+              ? { success: true, message: `Job ${args.jobId} paused` }
+              : { success: false, error: `Job ${args.jobId} not found` }
           }
 
           case 'resume': {
-            if (!args.job_id) {
-              return { success: false, error: 'job_id is required for resuming' }
+            if (!args.jobId) {
+              return { success: false, error: 'jobId is required for resuming' }
             }
-            const resumed = await cronService.resumeJob(args.job_id)
+            const resumed = await cronService.resumeJob(args.jobId)
             return resumed
-              ? { success: true, result: { message: `Job ${args.job_id} resumed` } }
-              : { success: false, error: `Job ${args.job_id} not found` }
+              ? { success: true, message: `Job ${args.jobId} resumed` }
+              : { success: false, error: `Job ${args.jobId} not found` }
           }
 
           default:

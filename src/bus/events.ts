@@ -117,6 +117,16 @@ export interface ErrorEvent {
 }
 
 /**
+ * Cron 定时任务触发事件
+ */
+export interface CronTriggerEvent {
+  sessionId: string
+  channelId: string
+  content: string
+  timestamp: Date
+}
+
+/**
  * 所有事件类型的映射
  */
 export interface EventMap {
@@ -128,5 +138,6 @@ export interface EventMap {
   'agent:execute': AgentExecuteEvent
   'subagent:start': SubAgentStartEvent
   'subagent:complete': SubAgentCompleteEvent
+  'cron:trigger': CronTriggerEvent
   error: ErrorEvent
 }

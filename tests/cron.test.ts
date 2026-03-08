@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { CronService, CronJobType } from '../src/cron/CronService'
+import * as fs from 'fs'
+import * as path from 'path'
 
 describe('CronService', () => {
   let cronService: CronService
+  const testWorkspace = path.join(process.cwd(), 'test-workspace')
 
   beforeEach(() => {
-    cronService = new CronService('test-workspace', {
+    // Ensure test workspace exists
+    if (!fs.existsSync(testWorkspace)) {
+      fs.mkdirSync(testWorkspace, { recursive: true })
+    }
+    cronService = new CronService(testWorkspace, {
       onTrigger: () => {
         // Mock callback for tests
       },
@@ -14,6 +21,12 @@ describe('CronService', () => {
 
   afterEach(async () => {
     await cronService.clearAll()
+    // Clean up test files
+    const storagePath = path.join(testWorkspace, 'cron-jobs.json')
+    if (fs.existsSync(storagePath)) {
+      fs.unlinkSync(storagePath)
+    }
+    fs.rmdirSync(testWorkspace)
   })
 
   it('should create a cron job with interval', async () => {
@@ -110,5 +123,72 @@ describe('CronService', () => {
     const result3 = CronService.parseTimeExpression('9am Vancouver time daily')
     expect(result3.cronExpr).toBe('0 9 * * *')
     expect(result3.timezone).toBe('America/Vancouver')
+  })
+
+  it('should persist jobs to storage', async () => {
+    const job1 = await cronService.addJob('Persistent job 1', 'session-1', 'channel-1', {
+      intervalSeconds: 300,
+      type: CronJobType.REMINDER,
+    })
+
+    const job2 = await cronService.addJob('Persistent job 2', 'session-2', 'channel-2', {
+      cronExpr: '0 8 * * *',
+      type: CronJobType.TASK,
+    })
+
+    // Verify storage file exists
+    const storagePath = path.join(testWorkspace, 'cron-jobs.json')
+    expect(fs.existsSync(storagePath)).toBe(true)
+
+    // Verify file content
+    const savedData = JSON.parse(fs.readFileSync(storagePath, 'utf-8'))
+    expect(savedData.length).toBe(2)
+    expect(savedData[0].message).toBe('Persistent job 1')
+    expect(savedData[1].message).toBe('Persistent job 2')
+  })
+
+  it('should restore jobs from storage on initialization', async () => {
+    // Create first service and add jobs
+    const storagePath = path.join(testWorkspace, 'cron-jobs.json')
+    
+    const job = await cronService.addJob('Restore test job', 'session-1', 'channel-1', {
+      intervalSeconds: 600,
+      type: CronJobType.REMINDER,
+    })
+    
+    const jobId = job.id
+    await cronService.clearAll()
+
+    // Create second service - should restore from storage
+    const cronService2 = new CronService(testWorkspace, {
+      onTrigger: () => {},
+    })
+
+    const restoredJobs = await cronService2.listJobs()
+    expect(restoredJobs.length).toBe(1)
+    expect(restoredJobs[0].id).toBe(jobId)
+    expect(restoredJobs[0].message).toBe('Restore test job')
+    expect(restoredJobs[0].active).toBe(true)
+
+    await cronService2.clearAll()
+  })
+
+  it('should persist job state changes (pause/resume)', async () => {
+    const job = await cronService.addJob('State test', 'session', 'channel', {
+      intervalSeconds: 60,
+    })
+
+    await cronService.pauseJob(job.id)
+
+    // Verify paused state is persisted
+    const storagePath = path.join(testWorkspace, 'cron-jobs.json')
+    const savedData = JSON.parse(fs.readFileSync(storagePath, 'utf-8'))
+    expect(savedData[0].active).toBe(false)
+
+    await cronService.resumeJob(job.id)
+
+    // Verify resumed state is persisted
+    const updatedData = JSON.parse(fs.readFileSync(storagePath, 'utf-8'))
+    expect(updatedData[0].active).toBe(true)
   })
 })

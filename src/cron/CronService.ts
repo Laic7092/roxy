@@ -2,6 +2,8 @@ import { CronJob } from 'cron'
 import { v4 as uuidv4 } from 'uuid'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
+import * as fs from 'fs'
+import * as path from 'path'
 
 /**
  * Cron job types
@@ -61,10 +63,172 @@ export class CronService {
   private cronJobs: Map<string, CronJob> = new Map()
   private workspace: string
   private callbacks: CronCallbacks
+  private storagePath: string
 
   constructor(workspace: string, callbacks?: CronCallbacks) {
     this.workspace = workspace
     this.callbacks = callbacks || {}
+    this.storagePath = path.join(workspace, 'cron-jobs.json')
+    this.loadJobs()
+  }
+
+  /**
+   * Load jobs from storage
+   */
+  private loadJobs(): void {
+    try {
+      if (!fs.existsSync(this.storagePath)) {
+        log('info', 'No existing cron jobs file found', 'CronService')
+        return
+      }
+
+      const data = fs.readFileSync(this.storagePath, 'utf-8')
+      const jobsData: Array<CronJobDefinition & {
+        createdAt: string
+        lastExecution?: string
+        nextExecution?: string
+      }> = JSON.parse(data)
+
+      for (const jobData of jobsData) {
+        const job: CronJobDefinition = {
+          ...jobData,
+          createdAt: new Date(jobData.createdAt),
+          lastExecution: jobData.lastExecution ? new Date(jobData.lastExecution) : undefined,
+          nextExecution: jobData.nextExecution ? new Date(jobData.nextExecution) : undefined,
+        }
+
+        // Restore job
+        this.jobs.set(job.id, job)
+
+        // Recreate cron job if active and not one-time
+        if (job.active && job.type !== CronJobType.ONE_TIME) {
+          const cronJob = this.createCronJobFromExisting(job)
+          this.cronJobs.set(job.id, cronJob)
+        }
+
+        log('info', `Restored cron job: ${job.id}`, 'CronService')
+      }
+
+      log('success', `Loaded ${jobsData.length} cron job(s) from storage`, 'CronService')
+    } catch (error) {
+      logError(
+        error instanceof Error
+          ? new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to load cron jobs', error)
+          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to load cron jobs'),
+        'error',
+        'CronService',
+      )
+    }
+  }
+
+  /**
+   * Save jobs to storage
+   */
+  private saveJobs(): void {
+    try {
+      const jobsData = Array.from(this.jobs.values()).map(job => ({
+        ...job,
+        createdAt: job.createdAt.toISOString(),
+        lastExecution: job.lastExecution?.toISOString(),
+        nextExecution: job.nextExecution?.toISOString(),
+      }))
+
+      fs.writeFileSync(this.storagePath, JSON.stringify(jobsData, null, 2), 'utf-8')
+      log('debug', `Saved ${jobsData.length} cron job(s) to storage`, 'CronService')
+    } catch (error) {
+      logError(
+        error instanceof Error
+          ? new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to save cron jobs', error)
+          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to save cron jobs'),
+        'error',
+        'CronService',
+      )
+    }
+  }
+
+  /**
+   * Create cron job from existing job definition (for restoration)
+   */
+  private createCronJobFromExisting(job: CronJobDefinition): CronJob {
+    const onTick = async () => {
+      try {
+        job.executionCount++
+        job.lastExecution = new Date()
+        this.saveJobs()
+
+        if (this.cronJobs.has(job.id)) {
+          const cronJob = this.cronJobs.get(job.id)!
+          try {
+            const nextDates = cronJob.nextDates?.()
+            if (nextDates && nextDates[0]) {
+              job.nextExecution = typeof nextDates[0].toDate === 'function'
+                ? nextDates[0].toDate()
+                : nextDates[0]
+            }
+          } catch (_e) {
+            // Ignore if nextDates is not available
+          }
+        }
+
+        if (job.type === CronJobType.REMINDER || job.type === CronJobType.TASK) {
+          const prefix = job.type === CronJobType.REMINDER ? '⏰ Reminder: ' : '[Scheduled Task] '
+          const content = `${prefix}${job.message}`
+          this.callbacks.onTrigger?.(job.sessionId, job.channelId, content)
+        }
+
+        if (job.type === CronJobType.ONE_TIME) {
+          await this.removeJob(job.id)
+        }
+
+        log('success', `Cron job executed: ${job.id}`, 'CronService', {
+          executionCount: job.executionCount,
+        })
+      } catch (error) {
+        logError(
+          error instanceof Error
+            ? new RoxyError(ErrorCode.SYSTEM_ERROR, `Cron job execution failed: ${job.id}`, error)
+            : new RoxyError(ErrorCode.SYSTEM_ERROR, `Cron job execution failed: ${job.id}`),
+          'error',
+          'CronService',
+        )
+      }
+    }
+
+    if (job.at) {
+      const fireTime = new Date(job.at)
+      return CronJob.from({
+        cronTime: fireTime,
+        onTick,
+        start: true,
+        timeZone: job.timezone,
+      })
+    } else if (job.intervalSeconds) {
+      const intervalMs = job.intervalSeconds * 1000
+      let intervalId: NodeJS.Timeout = setInterval(onTick, intervalMs)
+      let isRunning = true
+      return {
+        stop: () => {
+          clearInterval(intervalId)
+          isRunning = false
+        },
+        start: () => {
+          if (!isRunning) {
+            intervalId = setInterval(onTick, intervalMs)
+            isRunning = true
+          }
+        },
+        nextDates: () => [new Date(Date.now() + intervalMs)],
+      } as any
+    } else if (job.cronExpr) {
+      return CronJob.from({
+        cronTime: job.cronExpr,
+        onTick,
+        start: true,
+        timeZone: job.timezone,
+      })
+    } else {
+      throw new Error('Invalid job configuration')
+    }
   }
 
   /**
@@ -110,6 +274,9 @@ export class CronService {
     const cronJob = await this.createCronJob(job)
     this.cronJobs.set(jobId, cronJob)
     this.jobs.set(jobId, job)
+
+    // Persist to storage
+    this.saveJobs()
 
     log('info', `Cron job created: ${jobId}`, 'CronService', {
       type: job.type,
@@ -240,6 +407,9 @@ export class CronService {
     // Remove job definition
     this.jobs.delete(jobId)
 
+    // Persist to storage
+    this.saveJobs()
+
     log('info', `Cron job removed: ${jobId}`, 'CronService')
     return true
   }
@@ -278,6 +448,7 @@ export class CronService {
     if (cronJob) {
       cronJob.stop()
       job.active = false
+      this.saveJobs()
       log('info', `Cron job paused: ${jobId}`, 'CronService')
       return true
     }
@@ -317,6 +488,7 @@ export class CronService {
         // Ignore if nextDates is not available
       }
 
+      this.saveJobs()
       log('info', `Cron job resumed: ${jobId}`, 'CronService')
       return true
     }

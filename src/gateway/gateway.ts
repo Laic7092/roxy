@@ -12,6 +12,7 @@ import { RoxyError, ErrorCode } from '../types/errors'
 import { v4 as uuidv4 } from 'uuid'
 import { loadConfig } from '../config/manager'
 import { SubAgentManager } from '../agent/subAgent'
+import { CronService } from '../cron/CronService'
 
 /**
  * Roxy Gateway - 统一服务入口
@@ -27,6 +28,7 @@ export class RoxyGateway {
   private readonly toolExecutor: ToolExecutor
   private provider: LiteLLMProvider | null = null
   private subAgentManager: SubAgentManager | null = null
+  private cronService: CronService | null = null
 
   private readonly agents: Map<string, AgentLoop> = new Map()
 
@@ -121,6 +123,45 @@ export class RoxyGateway {
     this.bus.on('user:message', async (event) => {
       await this.handleUserMessage(event)
     })
+
+    this.bus.on('cron:trigger', async (event) => {
+      await this.handleCronTrigger(event)
+    })
+  }
+
+  private async handleCronTrigger(event: any): Promise<void> {
+    const { channelId, sessionId, content } = event
+
+    try {
+      const agentId = this.defaultAgentId
+      const taskId = uuidv4()
+
+      log('info', `Cron task triggered: ${content.substring(0, 50)}...`, 'RoxyGateway')
+
+      // 发布任务执行事件
+      this.bus.emit('agent:execute', {
+        taskId,
+        agentId,
+        channelId,
+        sessionId,
+        content,
+      })
+    } catch (error) {
+      logError(
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to handle cron trigger', error instanceof Error ? error : undefined),
+        'error',
+        'RoxyGateway',
+      )
+
+      this.bus.emit('error', {
+        channelId,
+        sessionId,
+        error,
+        timestamp: new Date(),
+      })
+    }
   }
 
   private async handleUserMessage(event: any): Promise<void> {
@@ -194,6 +235,24 @@ export class RoxyGateway {
     log('info', 'Initializing Roxy Gateway...', 'RoxyGateway')
 
     await this.toolExecutor.initialize()
+
+    // 创建 CronService（全局单例，由 Gateway 管理）
+    this.cronService = new CronService(this.config.workspace, {
+      onTrigger: (sessionId, channelId, content) => {
+        this.bus.emit('cron:trigger', {
+          sessionId,
+          channelId,
+          content,
+          timestamp: new Date(),
+        })
+      },
+    })
+
+    // 注册 CronTool（使用注入的 CronService 实例）
+    const { createCronTools } = await import('../tools/CronTool')
+    const cronTools = createCronTools(this.cronService, this.bus)
+    this.toolExecutor.registerTools([...cronTools])
+
     await this.registerAllTools()
 
     const providerConfig = await this.loadProviderConfig()
@@ -247,14 +306,9 @@ export class RoxyGateway {
   private async registerAllTools(): Promise<void> {
     const { fileSystemTools } = await import('../tools/FileSystemTools')
     const { commandTools } = await import('../tools/CommandTools')
-    const { createCronTools } = await import('../tools/CronTool')
 
     // 基础工具
     this.toolExecutor.registerTools([...fileSystemTools, ...commandTools])
-
-    // CronTool（全局单例，执行时获取上下文）
-    const cronTools = createCronTools(this.config.workspace, this.bus)
-    this.toolExecutor.registerTools([...cronTools])
 
     // SpawnTool 需要 SubAgentManager，等创建后再注册
     log('info', `Registered ${this.toolExecutor.getToolCount()} tool(s)`, 'RoxyGateway')
@@ -349,11 +403,10 @@ export class RoxyGateway {
       await this.destroyAgent(agentId)
     }
 
-    try {
-      const { clearAllCronServices } = await import('../tools/CronTool')
-      await clearAllCronServices()
-    } catch (error) {
-      log('warn', `Failed to clear cron services: ${error}`, 'RoxyGateway')
+    // 清除 CronService
+    if (this.cronService) {
+      await this.cronService.clearAll()
+      this.cronService = null
     }
   }
 
