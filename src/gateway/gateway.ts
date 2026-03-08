@@ -533,7 +533,11 @@ export class RoxyGateway {
       }
 
       providerManager.initializeFromConfig(providersConfig)
-      log('info', `Providers initialized: ${providerManager.getConfiguredProviders().join(', ')}`, 'RoxyGateway')
+      log(
+        'info',
+        `Providers initialized: ${providerManager.getConfiguredProviders().join(', ')}`,
+        'RoxyGateway',
+      )
     } catch (error) {
       logError(
         new RoxyError(

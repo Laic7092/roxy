@@ -155,10 +155,11 @@ export class AgentLoop {
 
           for (const toolCall of toolCalls) {
             // arguments 可能是对象，需要转换为字符串
-            const argsStr = typeof toolCall.function.arguments === 'string' 
-              ? toolCall.function.arguments 
-              : JSON.stringify(toolCall.function.arguments)
-            
+            const argsStr =
+              typeof toolCall.function.arguments === 'string'
+                ? toolCall.function.arguments
+                : JSON.stringify(toolCall.function.arguments)
+
             try {
               const args = JSON.parse(argsStr)
               this.bus.emit('agent:tool_call', {
@@ -187,9 +188,10 @@ export class AgentLoop {
             toolCalls.map((call) => ({
               name: call.function.name,
               // 转换为字符串
-              arguments: typeof call.function.arguments === 'string' 
-                ? call.function.arguments 
-                : JSON.stringify(call.function.arguments),
+              arguments:
+                typeof call.function.arguments === 'string'
+                  ? call.function.arguments
+                  : JSON.stringify(call.function.arguments),
               id: call.id,
             })),
             { channelId: ctx.channelId, sessionId: ctx.sessionId },

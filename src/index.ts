@@ -1,6 +1,6 @@
 /**
  * Roxy - AI Assistant Framework
- * 
+ *
  * 事件驱动的 AI 助手框架，支持多 LLM 提供商、工具调用、会话管理和技能扩展
  */
 

@@ -10,7 +10,7 @@ type ProviderConstructor = new (cfg: ProviderConfig) => LLMProvider
 
 /**
  * Provider 管理器
- * 
+ *
  * 负责注册、管理和获取 LLM Provider 实例
  */
 export class ProviderManager {

@@ -5,7 +5,7 @@ import type { ProviderConfig } from '../config/types'
 
 /**
  * Ollama Provider
- * 
+ *
  * 实现 Ollama API 的聊天接口
  * API 文档：https://docs.ollama.com/api/chat
  */
@@ -283,7 +283,7 @@ export class OllamaProvider extends LLMProvider {
 
   /**
    * 构建 Ollama API URL
-   * 
+   *
    * Ollama 原生 API 使用 /api/chat，而非 OpenAI 兼容的 /v1/chat/completions
    * 需要移除配置中可能存在的 /v1 后缀
    */
