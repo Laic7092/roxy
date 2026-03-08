@@ -64,12 +64,41 @@ export class CronService {
   private workspace: string
   private callbacks: CronCallbacks
   private storagePath: string
+  /** 执行上下文锁，防止 cron 任务执行时递归创建新的 cron 任务 */
+  private executingContexts: Set<string> = new Set()
 
   constructor(workspace: string, callbacks?: CronCallbacks) {
     this.workspace = workspace
     this.callbacks = callbacks || {}
     this.storagePath = path.join(workspace, 'cron-jobs.json')
     this.loadJobs()
+  }
+
+  /**
+   * 设置执行上下文锁
+   * @param jobId - 任务 ID
+   * @returns 如果已成功锁定返回 true，否则返回 false（防止重复执行）
+   */
+  setExecutingContext(jobId: string): boolean {
+    if (this.executingContexts.has(jobId)) {
+      return false
+    }
+    this.executingContexts.add(jobId)
+    return true
+  }
+
+  /**
+   * 释放执行上下文锁
+   */
+  releaseExecutingContext(jobId: string): void {
+    this.executingContexts.delete(jobId)
+  }
+
+  /**
+   * 检查是否在执行上下文中
+   */
+  isExecutingContext(jobId: string): boolean {
+    return this.executingContexts.has(jobId)
   }
 
   /**
@@ -83,11 +112,13 @@ export class CronService {
       }
 
       const data = fs.readFileSync(this.storagePath, 'utf-8')
-      const jobsData: Array<CronJobDefinition & {
-        createdAt: string
-        lastExecution?: string
-        nextExecution?: string
-      }> = JSON.parse(data)
+      const jobsData: Array<
+        CronJobDefinition & {
+          createdAt: string
+          lastExecution?: string
+          nextExecution?: string
+        }
+      > = JSON.parse(data)
 
       for (const jobData of jobsData) {
         const job: CronJobDefinition = {
@@ -126,7 +157,7 @@ export class CronService {
    */
   private saveJobs(): void {
     try {
-      const jobsData = Array.from(this.jobs.values()).map(job => ({
+      const jobsData = Array.from(this.jobs.values()).map((job) => ({
         ...job,
         createdAt: job.createdAt.toISOString(),
         lastExecution: job.lastExecution?.toISOString(),
@@ -161,9 +192,8 @@ export class CronService {
           try {
             const nextDates = cronJob.nextDates?.()
             if (nextDates && nextDates[0]) {
-              job.nextExecution = typeof nextDates[0].toDate === 'function'
-                ? nextDates[0].toDate()
-                : nextDates[0]
+              job.nextExecution =
+                typeof nextDates[0].toDate === 'function' ? nextDates[0].toDate() : nextDates[0]
             }
           } catch (_e) {
             // Ignore if nextDates is not available
@@ -305,9 +335,8 @@ export class CronService {
           try {
             const nextDates = cronJob.nextDates?.()
             if (nextDates && nextDates[0]) {
-              job.nextExecution = typeof nextDates[0].toDate === 'function'
-                ? nextDates[0].toDate()
-                : nextDates[0]
+              job.nextExecution =
+                typeof nextDates[0].toDate === 'function' ? nextDates[0].toDate() : nextDates[0]
             }
           } catch (_e) {
             // Ignore if nextDates is not available
@@ -319,7 +348,7 @@ export class CronService {
         if (job.type === CronJobType.REMINDER || job.type === CronJobType.TASK) {
           const prefix = job.type === CronJobType.REMINDER ? '⏰ Reminder: ' : '[Scheduled Task] '
           const content = `${prefix}${job.message}`
-          
+
           // 通过回调通知 Gateway 发布事件
           this.callbacks.onTrigger?.(job.sessionId, job.channelId, content)
         }
@@ -357,7 +386,7 @@ export class CronService {
       // Interval-based job - use setInterval
       const intervalMs = job.intervalSeconds * 1000
       let intervalId: NodeJS.Timeout = setInterval(onTick, intervalMs)
-      
+
       // Wrap in CronJob-like interface
       let isRunning = true
       const wrappedJob: any = {
@@ -581,38 +610,40 @@ export class CronService {
     // "9am Vancouver time daily" -> "0 9 * * *", timezone: "America/Vancouver"
 
     // Match timezone patterns like "Vancouver time", "Pacific timezone", "EST time"
-    const timezoneMatch = lower.match(/\b(vancouver|pacific|pst|pdt|new york|eastern|est|edt|chicago|central|cst|cdt|denver|mountain|mst|mdt|los angeles|san francisco|london|gmt|utc|tokyo|jst|beijing|shanghai)\s+(?:time|timezone)\b/i)
+    const timezoneMatch = lower.match(
+      /\b(vancouver|pacific|pst|pdt|new york|eastern|est|edt|chicago|central|cst|cdt|denver|mountain|mst|mdt|los angeles|san francisco|london|gmt|utc|tokyo|jst|beijing|shanghai)\s+(?:time|timezone)\b/i,
+    )
     let timezone: string | undefined
 
     if (timezoneMatch) {
       const tzName = timezoneMatch[1].toLowerCase()
       // Map common timezone names to IANA format
       const tzMap: Record<string, string> = {
-        'vancouver': 'America/Vancouver',
-        'pacific': 'America/Vancouver',
-        'pst': 'America/Vancouver',
-        'pdt': 'America/Vancouver',
+        vancouver: 'America/Vancouver',
+        pacific: 'America/Vancouver',
+        pst: 'America/Vancouver',
+        pdt: 'America/Vancouver',
         'new york': 'America/New_York',
-        'eastern': 'America/New_York',
-        'est': 'America/New_York',
-        'edt': 'America/New_York',
-        'chicago': 'America/Chicago',
-        'central': 'America/Chicago',
-        'cdt': 'America/Chicago',
-        'denver': 'America/Denver',
-        'mountain': 'America/Denver',
-        'mst': 'America/Denver',
-        'mdt': 'America/Denver',
+        eastern: 'America/New_York',
+        est: 'America/New_York',
+        edt: 'America/New_York',
+        chicago: 'America/Chicago',
+        central: 'America/Chicago',
+        cdt: 'America/Chicago',
+        denver: 'America/Denver',
+        mountain: 'America/Denver',
+        mst: 'America/Denver',
+        mdt: 'America/Denver',
         'los angeles': 'America/Los_Angeles',
         'san francisco': 'America/Los_Angeles',
-        'london': 'Europe/London',
-        'gmt': 'Europe/London',
-        'utc': 'UTC',
-        'tokyo': 'Asia/Tokyo',
-        'jst': 'Asia/Tokyo',
-        'beijing': 'Asia/Shanghai',
-        'cst': 'Asia/Shanghai',
-        'shanghai': 'Asia/Shanghai',
+        london: 'Europe/London',
+        gmt: 'Europe/London',
+        utc: 'UTC',
+        tokyo: 'Asia/Tokyo',
+        jst: 'Asia/Tokyo',
+        beijing: 'Asia/Shanghai',
+        cst: 'Asia/Shanghai',
+        shanghai: 'Asia/Shanghai',
       }
       timezone = tzMap[tzName] || tzName
     }

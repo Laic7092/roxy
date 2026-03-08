@@ -4,7 +4,7 @@ import { RoxyError, ErrorCode } from '../types/errors'
 
 /**
  * ToolFunction - 工具函数定义
- * 
+ *
  * 每个工具必须包含：
  * - name: 工具名称
  * - description: 工具描述
@@ -36,12 +36,12 @@ export interface ToolExecutionResult {
 
 /**
  * ToolExecutor - 工具执行器
- * 
+ *
  * 职责：
  * - 管理工具注册
  * - 执行工具调用
  * - 处理工具错误
- * 
+ *
  * 架构原则：
  * - 不自动扫描注册工具，由 Gateway 显式注册
  * - Context 通过 executeTool 参数传递，不内部存储
@@ -75,7 +75,11 @@ export class ToolExecutor {
    */
   registerTool(tool: ToolFunction): void {
     if (this.tools.has(tool.name)) {
-      log('warn', `Tool '${tool.name}' is already registered and will be overwritten`, 'ToolExecutor')
+      log(
+        'warn',
+        `Tool '${tool.name}' is already registered and will be overwritten`,
+        'ToolExecutor',
+      )
     }
     this.tools.set(tool.name, tool)
     log('debug', `Tool registered: ${tool.name}`, 'ToolExecutor')
@@ -124,7 +128,7 @@ export class ToolExecutor {
 
   /**
    * 执行单个工具
-   * 
+   *
    * @param toolName 工具名称
    * @param argumentsObj 参数对象
    * @param providedId 可选的工具调用 ID（由 LLM 提供）
@@ -151,10 +155,15 @@ export class ToolExecutor {
     const tool = this.tools.get(toolName)
 
     if (!tool) {
-      const error = new RoxyError(ErrorCode.TOOL_NOT_FOUND, `Tool '${toolName}' not found`, undefined, {
-        toolName,
-        availableTools: Array.from(this.tools.keys()),
-      })
+      const error = new RoxyError(
+        ErrorCode.TOOL_NOT_FOUND,
+        `Tool '${toolName}' not found`,
+        undefined,
+        {
+          toolName,
+          availableTools: Array.from(this.tools.keys()),
+        },
+      )
       logError(error, 'error', 'ToolExecutor')
       // 返回字符串而不是对象，避免 LLM API 格式错误
       return {
@@ -201,7 +210,7 @@ export class ToolExecutor {
 
   /**
    * 执行多个工具调用
-   * 
+   *
    * @param toolCalls 工具调用数组，每个元素包含 name, arguments 和可选的 id
    * @param context 执行上下文（channelId, sessionId）
    */
@@ -270,14 +279,18 @@ export class ToolExecutor {
     )
 
     const successCount = results.filter((r) => !r.result?.success === false).length
-    log('debug', `Tool execution completed: ${successCount}/${toolCalls.length} successful`, 'ToolExecutor')
+    log(
+      'debug',
+      `Tool execution completed: ${successCount}/${toolCalls.length} successful`,
+      'ToolExecutor',
+    )
 
     return results
   }
 
   /**
    * 格式化工具输出
-   * 
+   *
    * 支持多种输出格式：
    * - null/undefined -> ''
    * - string -> 原样返回

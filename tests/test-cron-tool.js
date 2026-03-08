@@ -19,15 +19,20 @@ async function testCronTool() {
   const executor = new ToolExecutor(workspace)
 
   // Wait for tools to initialize
-  await new Promise(resolve => setTimeout(resolve, 500))
+  await new Promise((resolve) => setTimeout(resolve, 500))
 
   // Test 1: Add a cron job
   console.log('Test 1: Adding a cron job...')
-  const result1 = await executor.executeTool('cron', {
-    action: 'add',
-    message: 'Test reminder',
-    every_seconds: 300, // 5 minutes
-  }, undefined, { channelId: 'test', sessionId: 'test' })
+  const result1 = await executor.executeTool(
+    'cron',
+    {
+      action: 'add',
+      message: 'Test reminder',
+      every_seconds: 300, // 5 minutes
+    },
+    undefined,
+    { channelId: 'test', sessionId: 'test' },
+  )
 
   console.log('Result:', JSON.stringify(result1, null, 2))
 

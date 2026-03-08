@@ -3,6 +3,8 @@ import { join } from 'path'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
 import type { LiteLLMProvider } from '../provider/llm'
+import type { SessionManager } from '../session/manager'
+import type { ChannelManager } from '../channels/manager'
 
 /**
  * Heartbeat 工具定义
@@ -44,15 +46,20 @@ export interface HeartbeatCallbacks {
   /** 任务执行回调 */
   onExecute?: (tasks: string) => Promise<string>
   /** 结果通知回调 */
-  onNotify?: (response: string) => Promise<void>
+  onNotify?: (response: string, target?: { channelId: string; sessionId: string }) => Promise<void>
 }
 
 export class HeartbeatService {
   private workspace: string
   private provider: LiteLLMProvider
   private model: string
+  private sessionManager?: SessionManager
+  private channelManager?: ChannelManager
   private onExecute?: (tasks: string) => Promise<string>
-  private onNotify?: (response: string) => Promise<void>
+  private onNotify?: (
+    response: string,
+    target?: { channelId: string; sessionId: string },
+  ) => Promise<void>
   private intervalSeconds: number
   private enabled: boolean
   private _running = false
@@ -65,6 +72,10 @@ export class HeartbeatService {
     model: string,
     callbacks?: HeartbeatCallbacks,
     config?: HeartbeatServiceConfig,
+    deps?: {
+      sessionManager?: SessionManager
+      channelManager?: ChannelManager
+    },
   ) {
     this.workspace = workspace
     this.provider = provider
@@ -74,6 +85,53 @@ export class HeartbeatService {
     this.intervalSeconds = config?.intervalSeconds ?? 30 * 60 // 默认 30 分钟
     this.enabled = config?.enabled ?? true
     this.heartbeatFilePath = join(workspace, 'HEARTBEAT.md')
+    this.sessionManager = deps?.sessionManager
+    this.channelManager = deps?.channelManager
+  }
+
+  /**
+   * 智能选择心跳通知的目标渠道和会话
+   * 优先选择最近更新的非内部会话
+   */
+  private pickHeartbeatTarget(): { channelId: string; sessionId: string } {
+    // 如果有 ChannelManager，优先使用启用的外部渠道
+    if (this.channelManager) {
+      const enabledChannels = this.channelManager.enabledChannels
+
+      // 如果有 SessionManager，查找最近更新的会话
+      if (this.sessionManager) {
+        const sessions = this.sessionManager.listSessions()
+        for (const session of sessions) {
+          const key = session.key || ''
+          if (!key.includes(':')) continue
+
+          const [channelId, sessionId] = key.split(':', 2)
+
+          // 跳过内部渠道
+          if (channelId === 'cli' || channelId === 'system' || channelId === 'heartbeat') continue
+
+          // 检查是否是启用的渠道
+          if (enabledChannels.includes(channelId) && sessionId) {
+            log(
+              'debug',
+              `Selected channel ${channelId}:${sessionId} for heartbeat notification`,
+              'HeartbeatService',
+            )
+            return { channelId, sessionId }
+          }
+        }
+      }
+
+      // 返回第一个启用的外部渠道
+      for (const channelId of enabledChannels) {
+        if (channelId !== 'cli' && channelId !== 'system') {
+          return { channelId, sessionId: 'default' }
+        }
+      }
+    }
+
+    // 默认返回 cli
+    return { channelId: 'cli', sessionId: 'direct' }
   }
 
   /**
@@ -88,7 +146,11 @@ export class HeartbeatService {
         return null
       }
       logError(
-        new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to read HEARTBEAT.md', error instanceof Error ? error : undefined),
+        new RoxyError(
+          ErrorCode.SYSTEM_ERROR,
+          'Failed to read HEARTBEAT.md',
+          error instanceof Error ? error : undefined,
+        ),
         'warn',
         'HeartbeatService',
       )
@@ -120,7 +182,11 @@ export class HeartbeatService {
       const toolCalls = response.choices?.[0]?.message?.tool_calls
 
       if (!toolCalls || toolCalls.length === 0) {
-        log('info', 'Heartbeat: LLM did not call heartbeat tool, defaulting to skip', 'HeartbeatService')
+        log(
+          'info',
+          'Heartbeat: LLM did not call heartbeat tool, defaulting to skip',
+          'HeartbeatService',
+        )
         return { action: 'skip', tasks: '' }
       }
 
@@ -131,7 +197,11 @@ export class HeartbeatService {
       }
     } catch (error) {
       logError(
-        new RoxyError(ErrorCode.LLM_API_ERROR, 'Heartbeat decision failed', error instanceof Error ? error : undefined),
+        new RoxyError(
+          ErrorCode.LLM_API_ERROR,
+          'Heartbeat decision failed',
+          error instanceof Error ? error : undefined,
+        ),
         'error',
         'HeartbeatService',
       )
@@ -165,13 +235,23 @@ export class HeartbeatService {
       if (this.onExecute && tasks) {
         const response = await this.onExecute(tasks)
         if (response && this.onNotify) {
-          log('info', 'Heartbeat: completed, delivering response', 'HeartbeatService')
-          await this.onNotify(response)
+          // 智能选择通知渠道
+          const target = this.pickHeartbeatTarget()
+          log(
+            'info',
+            `Heartbeat: completed, delivering response to ${target.channelId}`,
+            'HeartbeatService',
+          )
+          await this.onNotify(response, target)
         }
       }
     } catch (error) {
       logError(
-        new RoxyError(ErrorCode.SYSTEM_ERROR, 'Heartbeat execution failed', error instanceof Error ? error : undefined),
+        new RoxyError(
+          ErrorCode.SYSTEM_ERROR,
+          'Heartbeat execution failed',
+          error instanceof Error ? error : undefined,
+        ),
         'error',
         'HeartbeatService',
       )

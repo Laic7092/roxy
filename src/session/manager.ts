@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, unlink, copyFile } from 'fs/promises'
 import { join } from 'path'
+import { homedir } from 'os'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log } from '../utils/error-handler'
 
@@ -90,7 +91,7 @@ export class SessionManager {
   private sessions: Map<string, Session> = new Map()
 
   constructor(sessionDir?: string) {
-    this.dir = sessionDir || join(require('os').homedir(), '.roxy', 'sessions')
+    this.dir = sessionDir || join(homedir(), '.roxy', 'sessions')
   }
 
   private async ensureDir() {

@@ -96,15 +96,19 @@ describe('HeartbeatService', () => {
 
     // Mock LLM to return run
     mockProvider.chatResult = {
-      choices: [{
-        message: {
-          tool_calls: [{
-            function: {
-              arguments: JSON.stringify({ action: 'run', tasks: 'Do something' }),
-            },
-          }],
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              {
+                function: {
+                  arguments: JSON.stringify({ action: 'run', tasks: 'Do something' }),
+                },
+              },
+            ],
+          },
         },
-      }],
+      ],
     }
 
     const result = await heartbeatService.triggerNow()

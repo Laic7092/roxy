@@ -1,13 +1,13 @@
-import { CronService, CronJobType, type CronCallbacks } from '../services/CronService'
+import { CronService, CronJobType } from '../services/CronService'
 import type { Bus } from '../bus/instance'
 
 /**
  * 创建 CronTool（工厂函数）
- * 
+ *
  * @param cronService - CronService 实例（由 Gateway 注入）
- * @param bus - 事件总线（用于回调）
+ * @param _bus - 事件总线（用于回调）
  */
-export function createCronTools(cronService: CronService, bus: Bus) {
+export function createCronTools(cronService: CronService, _bus: Bus) {
   return [
     {
       name: 'cron',
@@ -66,13 +66,22 @@ export function createCronTools(cronService: CronService, bus: Bus) {
           type?: string
         },
         _workspace: string,
-        context?: { channelId: string; sessionId: string },
+        context?: { channelId: string; sessionId: string; isCronExecution?: boolean },
       ) => {
         const action = args.action?.toLowerCase() || 'add'
 
         // 使用执行时的上下文，而非注册时的上下文
         const sessionId = context?.sessionId || 'unknown'
         const channelId = context?.channelId || 'unknown'
+        const isCronExecution = context?.isCronExecution ?? false
+
+        // 防止 cron 任务执行时递归创建新的 cron 任务
+        if (isCronExecution && action === 'add') {
+          return {
+            success: false,
+            error: 'Cannot schedule new cron jobs during cron task execution',
+          }
+        }
 
         switch (action) {
           case 'add': {

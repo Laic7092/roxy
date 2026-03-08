@@ -130,6 +130,67 @@ export async function initConfig(): Promise<string> {
   return CONFIG_PATH
 }
 
+/**
+ * 同步工作区模板文件
+ * 确保工作区文件与模板保持同步（用于更新模板后的同步）
+ */
+export async function syncWorkspaceTemplates(): Promise<void> {
+  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md']
+  const today = new Date().toISOString().split('T')[0]
+
+  for (const fileName of files) {
+    const templatePath = join(TEMPLATE_PATH, fileName)
+    const workspacePath = join(WROKSPACE_PATH, fileName)
+
+    try {
+      // 检查模板文件是否存在
+      const templateExists = await fileExists(templatePath)
+      if (!templateExists) {
+        log('warn', `Template not found: ${fileName}`, 'config/manager')
+        continue
+      }
+
+      // 检查工作区文件是否存在
+      const workspaceExists = await fileExists(workspacePath)
+
+      if (!workspaceExists) {
+        // 文件不存在，直接创建
+        let content = await readFile(templatePath, 'utf-8')
+        content = content.replace(/{{DATE}}/g, today)
+        await writeFile(workspacePath, content, 'utf-8')
+        log('success', `Created: ${fileName}`, 'config/manager')
+        continue
+      }
+
+      // 文件已存在，比较内容
+      const templateContent = await readFile(templatePath, 'utf-8')
+      const workspaceContent = await readFile(workspacePath, 'utf-8')
+
+      // 如果模板内容不同，可以选择更新或跳过
+      // 这里选择只创建不存在的文件，不覆盖已存在的文件
+      if (templateContent !== workspaceContent) {
+        log(
+          'debug',
+          `File exists and differs from template: ${fileName} (skipping)`,
+          'config/manager',
+        )
+      }
+    } catch (error) {
+      logError(
+        new RoxyError(
+          ErrorCode.CONFIG_INVALID,
+          `同步模板失败：${fileName}`,
+          error instanceof Error ? error : undefined,
+        ),
+        'error',
+        'config/manager',
+      )
+    }
+  }
+
+  log('info', 'Workspace templates synchronized', 'config/manager')
+}
+
 export async function loadConfig(): Promise<Config> {
   try {
     const data = await readFile(CONFIG_PATH, 'utf-8')

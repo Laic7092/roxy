@@ -80,18 +80,10 @@ export class SkillsLoader {
             }
           }
         })().catch((error) => {
-          logError(
-            error instanceof Error ? error : new Error(String(error)),
-            'warn',
-            'skill',
-          )
+          logError(error instanceof Error ? error : new Error(String(error)), 'warn', 'skill')
         })
       } catch (error) {
-        logError(
-          error instanceof Error ? error : new Error(String(error)),
-          'warn',
-          'skill',
-        )
+        logError(error instanceof Error ? error : new Error(String(error)), 'warn', 'skill')
       }
     }
   }

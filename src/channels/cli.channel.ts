@@ -84,7 +84,13 @@ export class CLIChannel extends BaseChannel {
         this.showSubAgentStart(message.data?.taskId, message.data?.label, message.data?.task)
         break
       case 'subagent_complete':
-        this.showSubAgentComplete(message.data?.taskId, message.data?.label, message.data?.result, message.data?.success, message.data?.error)
+        this.showSubAgentComplete(
+          message.data?.taskId,
+          message.data?.label,
+          message.data?.result,
+          message.data?.success,
+          message.data?.error,
+        )
         break
       case 'error':
         this.showError(message.content || message.data?.error)

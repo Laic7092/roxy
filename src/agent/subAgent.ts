@@ -256,10 +256,10 @@ export class SubAgentManager {
         error instanceof RoxyError
           ? error
           : new RoxyError(
-            ErrorCode.SYSTEM_ERROR,
-            `Subagent [${task.id}] failed`,
-            error instanceof Error ? error : undefined,
-          ),
+              ErrorCode.SYSTEM_ERROR,
+              `Subagent [${task.id}] failed`,
+              error instanceof Error ? error : undefined,
+            ),
         'error',
         'SubAgentManager',
       )
@@ -315,11 +315,7 @@ ${this.workspace}
     // 通过回调通知，而非直接发布事件
     this.callbacks.onSubAgentComplete?.(task, status === 'ok')
 
-    log(
-      'debug',
-      `Subagent [${task.id}] announced result via callback`,
-      'SubAgentManager',
-    )
+    log('debug', `Subagent [${task.id}] announced result via callback`, 'SubAgentManager')
   }
 
   /**

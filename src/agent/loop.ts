@@ -150,7 +150,10 @@ export class AgentLoop {
               })
             } catch {
               logError(
-                new RoxyError(ErrorCode.TOOL_ARGUMENT_PARSE_ERROR, 'Failed to parse tool arguments'),
+                new RoxyError(
+                  ErrorCode.TOOL_ARGUMENT_PARSE_ERROR,
+                  'Failed to parse tool arguments',
+                ),
                 'warn',
                 'AgentLoop',
               )
@@ -188,7 +191,11 @@ export class AgentLoop {
         const roxyError =
           error instanceof RoxyError
             ? error
-            : new RoxyError(ErrorCode.LLM_API_ERROR, `Iteration ${iteration} failed`, error instanceof Error ? error : undefined)
+            : new RoxyError(
+                ErrorCode.LLM_API_ERROR,
+                `Iteration ${iteration} failed`,
+                error instanceof Error ? error : undefined,
+              )
 
         logError(roxyError, 'warn', 'AgentLoop')
 

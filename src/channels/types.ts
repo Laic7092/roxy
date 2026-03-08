@@ -2,7 +2,16 @@
  * Channel 输出消息类型
  */
 export interface ChannelMessage {
-  type: 'response' | 'stream' | 'tool_call' | 'tool_result' | 'error' | 'connected' | 'session_created' | 'session_switched' | 'sessions_list'
+  type:
+    | 'response'
+    | 'stream'
+    | 'tool_call'
+    | 'tool_result'
+    | 'error'
+    | 'connected'
+    | 'session_created'
+    | 'session_switched'
+    | 'sessions_list'
   content?: any
   data?: any
   sessionId?: string

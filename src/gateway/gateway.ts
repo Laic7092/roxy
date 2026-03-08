@@ -6,14 +6,23 @@ import { ContextMng } from '../agent/context'
 import { LiteLLMProvider } from '../provider/llm'
 import type { AgentConfig } from '../agent/types'
 import { AgentRole } from '../agent/types'
-import type { GatewayConfig, GatewayDeps, GatewayInput, GatewayOutput, GatewayEventHandler } from './types'
+import type {
+  GatewayConfig,
+  GatewayDeps,
+  GatewayInput,
+  GatewayOutput,
+  GatewayEventHandler,
+} from './types'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { v4 as uuidv4 } from 'uuid'
-import { loadConfig } from '../config/manager'
+import { loadConfig, initAll, syncWorkspaceTemplates } from '../config/manager'
 import { SubAgentManager } from '../agent/subAgent'
 import { CronService } from '../services/CronService'
 import { HeartbeatService } from '../services/HeartbeatService'
+import { ChannelManager } from '../channels/manager'
+import { CLIChannel } from '../channels/cli.channel'
+import chalk from 'chalk'
 
 /**
  * Roxy Gateway - 统一服务入口
@@ -27,6 +36,7 @@ export class RoxyGateway {
   private readonly bus: Bus
   private readonly sessionManager: SessionManager
   private readonly toolExecutor: ToolExecutor
+  private channelManager: ChannelManager | null = null
   private provider: LiteLLMProvider | null = null
   private subAgentManager: SubAgentManager | null = null
   private cronService: CronService | null = null
@@ -43,8 +53,9 @@ export class RoxyGateway {
   constructor(deps: GatewayDeps) {
     this.config = deps.config
     this.bus = getBus()
-    this.sessionManager = new SessionManager(deps.config.sessionDir)
+    this.sessionManager = new SessionManager(deps.config.sessionDir || '')
     this.toolExecutor = new ToolExecutor(deps.config.workspace)
+    this.channelManager = new ChannelManager(this.bus)
     this.setupEventSubscriptions()
   }
 
@@ -154,19 +165,24 @@ export class RoxyGateway {
 
       log('info', `Cron task triggered: ${content.substring(0, 50)}...`, 'RoxyGateway')
 
-      // 发布任务执行事件
+      // 发布任务执行事件，标记为 cron 执行上下文
       this.bus.emit('agent:execute', {
         taskId,
         agentId,
         channelId,
         sessionId,
         content,
+        isCronExecution: true,
       })
     } catch (error) {
       logError(
         error instanceof RoxyError
           ? error
-          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to handle cron trigger', error instanceof Error ? error : undefined),
+          : new RoxyError(
+              ErrorCode.SYSTEM_ERROR,
+              'Failed to handle cron trigger',
+              error instanceof Error ? error : undefined,
+            ),
         'error',
         'RoxyGateway',
       )
@@ -199,7 +215,11 @@ export class RoxyGateway {
       logError(
         error instanceof RoxyError
           ? error
-          : new RoxyError(ErrorCode.SYSTEM_ERROR, 'Failed to handle user message', error instanceof Error ? error : undefined),
+          : new RoxyError(
+              ErrorCode.SYSTEM_ERROR,
+              'Failed to handle user message',
+              error instanceof Error ? error : undefined,
+            ),
         'error',
         'RoxyGateway',
       )
@@ -250,7 +270,14 @@ export class RoxyGateway {
   async initialize(): Promise<void> {
     log('info', 'Initializing Roxy Gateway...', 'RoxyGateway')
 
+    // 初始化和同步工作区模板
+    await initAll(false)
+    await syncWorkspaceTemplates()
+
     await this.toolExecutor.initialize()
+
+    // 注册 Channel
+    this.registerChannels()
 
     // 创建 CronService（全局单例，由 Gateway 管理）
     this.cronService = new CronService(this.config.workspace, {
@@ -278,77 +305,112 @@ export class RoxyGateway {
     this.provider = new LiteLLMProvider(providerConfig)
 
     // 创建 HeartbeatService（需要 provider 和回调）
-    this.heartbeatService = new HeartbeatService(this.config.workspace, this.provider, providerConfig.model, {
-      onExecute: async (tasks: string) => {
-        // 执行任务：发布到事件总线，让 Agent 处理
-        return new Promise((resolve) => {
-          const taskId = uuidv4()
-          const channelId = 'heartbeat'
-          const sessionId = 'heartbeat-session'
+    this.heartbeatService = new HeartbeatService(
+      this.config.workspace,
+      this.provider,
+      providerConfig.model,
+      {
+        onExecute: async (tasks: string) => {
+          // 执行任务：发布到事件总线，让 Agent 处理
+          return new Promise((resolve) => {
+            const taskId = uuidv4()
+            const channelId = 'heartbeat'
+            const sessionId = 'heartbeat-session'
 
-          // 监听响应
-          const handler = (event: any) => {
-            if (event.sessionId === sessionId && event.taskId === taskId) {
-              this.bus.off('agent:response', handler)
-              resolve(event.content)
+            // 监听响应
+            const handler = (event: any) => {
+              if (event.sessionId === sessionId && event.taskId === taskId) {
+                this.bus.off('agent:response', handler)
+                resolve(event.content)
+              }
+            }
+            this.bus.on('agent:response', handler)
+
+            // 发布任务
+            this.bus.emit('agent:execute', {
+              taskId,
+              agentId: this.defaultAgentId,
+              channelId,
+              sessionId,
+              content: tasks,
+            })
+
+            // 超时处理
+            setTimeout(
+              () => {
+                this.bus.off('agent:response', handler)
+                resolve('Task execution timeout')
+              },
+              5 * 60 * 1000,
+            )
+          })
+        },
+        onNotify: async (response: string, target) => {
+          // 通知结果到指定渠道
+          if (target && this.channelManager) {
+            try {
+              await this.channelManager.sendToChannel(target.channelId, {
+                type: 'response',
+                channelId: target.channelId,
+                sessionId: target.sessionId,
+                content: response,
+              })
+            } catch (error) {
+              logError(
+                new RoxyError(
+                  ErrorCode.CHANNEL_CONNECTION_FAILED,
+                  'Failed to deliver heartbeat notification',
+                  error instanceof Error ? error : undefined,
+                ),
+                'warn',
+                'HeartbeatService',
+              )
             }
           }
-          this.bus.on('agent:response', handler)
-
-          // 发布任务
-          this.bus.emit('agent:execute', {
-            taskId,
-            agentId: this.defaultAgentId,
-            channelId,
-            sessionId,
-            content: tasks,
-          })
-
-          // 超时处理
-          setTimeout(() => {
-            this.bus.off('agent:response', handler)
-            resolve('Task execution timeout')
-          }, 5 * 60 * 1000)
-        })
+        },
       },
-      onNotify: async (response: string) => {
-        // 通知结果：可以通过某种渠道通知用户
-        log('info', `Heartbeat task completed: ${response.substring(0, 100)}...`, 'HeartbeatService')
+      {
+        enabled: this.config.heartbeat?.enabled ?? true,
+        intervalSeconds: this.config.heartbeat?.interval ?? 1800, // 默认 30 分钟
       },
-    }, {
-      enabled: this.config.heartbeat?.enabled ?? true,
-      intervalSeconds: this.config.heartbeat?.interval ?? 1800, // 默认 30 分钟
-    })
+      {
+        sessionManager: this.sessionManager,
+        channelManager: this.channelManager || undefined,
+      },
+    )
 
     // 创建 SubAgentManager
-    this.subAgentManager = new SubAgentManager({
-      provider: this.provider,
-      sessionManager: this.sessionManager,
-      toolExecutor: this.toolExecutor,
-      workspace: this.config.workspace,
-    }, {
-      onSubAgentStart: (task) => {
-        this.bus.emit('subagent:start', {
-          taskId: task.id,
-          label: task.label,
-          task: task.task,
-          parentChannelId: task.parentChannelId,
-          parentSessionId: task.parentSessionId,
-        })
+    this.subAgentManager = new SubAgentManager(
+      {
+        provider: this.provider,
+        sessionManager: this.sessionManager,
+        toolExecutor: this.toolExecutor,
+        workspace: this.config.workspace,
       },
-      onSubAgentComplete: (task, success) => {
-        this.bus.emit('subagent:complete', {
-          taskId: task.id,
-          label: task.label,
-          parentChannelId: task.parentChannelId,
-          parentSessionId: task.parentSessionId,
-          result: task.result || '',
-          success,
-          error: task.error,
-          timestamp: new Date(),
-        })
+      {
+        onSubAgentStart: (task) => {
+          this.bus.emit('subagent:start', {
+            taskId: task.id,
+            label: task.label,
+            task: task.task,
+            parentChannelId: task.parentChannelId,
+            parentSessionId: task.parentSessionId,
+          })
+        },
+        onSubAgentComplete: (task, success) => {
+          this.bus.emit('subagent:complete', {
+            taskId: task.id,
+            label: task.label,
+            parentChannelId: task.parentChannelId,
+            parentSessionId: task.parentSessionId,
+            result: task.result || '',
+            success,
+            error: task.error,
+            timestamp: new Date(),
+          })
+        },
       },
-    })
+    )
 
     // 注册 SpawnTool（需要 SubAgentManager）
     await this.registerSpawnTool()
@@ -361,8 +423,77 @@ export class RoxyGateway {
     // 启动心跳服务
     await this.heartbeatService.start()
 
+    // 显示启动状态
+    this.printStartupStatus()
+
     this._running = true
     log('info', 'Roxy Gateway initialized', 'RoxyGateway')
+  }
+
+  /**
+   * 注册所有渠道
+   */
+  private registerChannels(): void {
+    if (!this.channelManager) return
+
+    // 注册 CLI 渠道
+    this.channelManager.register(
+      'cli',
+      () => {
+        const channel = new CLIChannel('cli:default')
+        channel.setInputHandler((content) => {
+          this.receive({
+            channelId: 'cli',
+            sessionId: channel.sessionIdValue || 'cli:default',
+            content,
+          })
+        })
+        return channel
+      },
+      true,
+    )
+
+    log('info', 'Channels registered', 'ChannelManager')
+  }
+
+  /**
+   * 打印启动状态
+   */
+  private printStartupStatus(): void {
+    console.log()
+    console.log(chalk.green.bold('✓ Roxy Gateway initialized'))
+    console.log()
+
+    // 渠道状态
+    if (this.channelManager) {
+      const enabledChannels = this.channelManager.enabledChannels
+      if (enabledChannels.length > 0) {
+        console.log(chalk.green('✓') + ` Channels enabled: ${chalk.cyan(enabledChannels.join(', '))}`)
+      } else {
+        console.log(chalk.yellow('⚠ Warning: No channels enabled'))
+      }
+    }
+
+    // Cron 状态
+    if (this.cronService) {
+      const cronStats = this.cronService.getStats()
+      if (cronStats.totalJobs > 0) {
+        console.log(chalk.green('✓') + ` Cron: ${chalk.cyan(cronStats.totalJobs)} scheduled job(s)`)
+      }
+    }
+
+    // 心跳状态
+    if (this.heartbeatService) {
+      const hbCfg = this.config.heartbeat
+      const interval = hbCfg?.interval ?? 1800
+      const intervalStr = interval >= 60 ? `${(interval / 60).toFixed(0)}min` : `${interval}s`
+      const status = this.heartbeatService.isRunning
+        ? chalk.green('running')
+        : chalk.gray('stopped')
+      console.log(chalk.green('✓') + ` Heartbeat: every ${chalk.cyan(intervalStr)} (${status})`)
+    }
+
+    console.log()
   }
 
   /**
@@ -405,7 +536,11 @@ export class RoxyGateway {
       return { apiKey, baseURL, model: modelName }
     } catch (error) {
       logError(
-        new RoxyError(ErrorCode.CONFIG_ERROR, 'Failed to load provider config', error instanceof Error ? error : undefined),
+        new RoxyError(
+          ErrorCode.CONFIG_ERROR,
+          'Failed to load provider config',
+          error instanceof Error ? error : undefined,
+        ),
         'error',
         'RoxyGateway',
       )
@@ -459,6 +594,11 @@ export class RoxyGateway {
     await this.destroyAllAgents()
     this.eventHandlers.clear()
 
+    // 停止所有渠道
+    if (this.channelManager) {
+      await this.channelManager.stopAll()
+    }
+
     this._running = false
     log('info', 'Roxy Gateway stopped', 'RoxyGateway')
   }
@@ -478,6 +618,11 @@ export class RoxyGateway {
     if (this.heartbeatService) {
       this.heartbeatService.stop()
       this.heartbeatService = null
+    }
+
+    // 清除 ChannelManager
+    if (this.channelManager) {
+      this.channelManager = null
     }
   }
 
@@ -513,5 +658,13 @@ export class RoxyGateway {
 
   getHeartbeatService(): HeartbeatService | null {
     return this.heartbeatService
+  }
+
+  getChannelManager(): ChannelManager | null {
+    return this.channelManager
+  }
+
+  getCronService(): CronService | null {
+    return this.cronService
   }
 }

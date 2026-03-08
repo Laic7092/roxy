@@ -1,4 +1,5 @@
 import type { AgentConfig } from '../agent/types'
+import type { ChannelConfig } from '../channels/manager'
 
 /**
  * Gateway 配置
@@ -14,6 +15,10 @@ export interface GatewayConfig {
     enabled?: boolean
     /** 心跳间隔（秒），默认 1800s (30 分钟) */
     interval?: number
+  }
+  /** 渠道配置 */
+  channels?: {
+    [channelId: string]: ChannelConfig
   }
 }
 
@@ -37,7 +42,14 @@ export interface GatewayInput {
  * 消息输出
  */
 export interface GatewayOutput {
-  type: 'response' | 'stream' | 'tool_call' | 'tool_result' | 'error' | 'subagent_start' | 'subagent_complete'
+  type:
+    | 'response'
+    | 'stream'
+    | 'tool_call'
+    | 'tool_result'
+    | 'error'
+    | 'subagent_start'
+    | 'subagent_complete'
   channelId: string
   sessionId: string
   data: any

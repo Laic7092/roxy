@@ -150,12 +150,12 @@ describe('CronService', () => {
   it('should restore jobs from storage on initialization', async () => {
     // Create first service and add jobs
     const storagePath = path.join(testWorkspace, 'cron-jobs.json')
-    
+
     const job = await cronService.addJob('Restore test job', 'session-1', 'channel-1', {
       intervalSeconds: 600,
       type: CronJobType.REMINDER,
     })
-    
+
     const jobId = job.id
     await cronService.clearAll()
 
