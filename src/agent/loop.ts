@@ -125,6 +125,7 @@ export class AgentLoop {
           onStreamData: (chunk) => this.handleStreamData(ctx, chunk),
           tools,
           tool_choice: 'auto',
+          think: this.config.think ?? false,
         })
 
         const { tool_calls: toolCalls, content } = result.choices?.[0]?.message ?? {}
@@ -153,8 +154,13 @@ export class AgentLoop {
           hasToolCalls = true
 
           for (const toolCall of toolCalls) {
+            // arguments 可能是对象，需要转换为字符串
+            const argsStr = typeof toolCall.function.arguments === 'string' 
+              ? toolCall.function.arguments 
+              : JSON.stringify(toolCall.function.arguments)
+            
             try {
-              const args = JSON.parse(toolCall.function.arguments)
+              const args = JSON.parse(argsStr)
               this.bus.emit('agent:tool_call', {
                 agentId: ctx.agentId,
                 taskId: ctx.taskId,
@@ -180,7 +186,10 @@ export class AgentLoop {
           const toolResults = await this.toolExecutor.executeTools(
             toolCalls.map((call) => ({
               name: call.function.name,
-              arguments: call.function.arguments,
+              // 转换为字符串
+              arguments: typeof call.function.arguments === 'string' 
+                ? call.function.arguments 
+                : JSON.stringify(call.function.arguments),
               id: call.id,
             })),
             { channelId: ctx.channelId, sessionId: ctx.sessionId },

@@ -177,6 +177,7 @@ export class HeartbeatService {
         model: this.model,
         tools: [HEARTBEAT_TOOL],
         tool_choice: 'auto',
+        think: false,
       })
 
       const toolCalls = response.choices?.[0]?.message?.tool_calls

@@ -32,6 +32,8 @@ export interface AgentConfig {
   maxIterations?: number
   /** 超时时间（毫秒） */
   timeoutMs?: number
+  /** 思考模式，默认 false */
+  think?: boolean | 'high' | 'medium' | 'low'
 }
 
 /**

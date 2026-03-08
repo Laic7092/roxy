@@ -30,24 +30,24 @@ export class Session {
   addMessage(role: 'tool', content: string, tool_call_id: string): void
   addMessage(role: 'assistant', content: string, tool_calls: any): void
   addMessage(role: Exclude<Role, 'tool'>, content: string): void
-  addMessage(role: Role, content: string, tool_call_id?: string) {
+  addMessage(role: Role, content: string, meta?: any) {
     if (role === 'tool') {
-      if (!tool_call_id) {
+      if (!meta) {
         throw new Error('Tool messages require a tool_call_id')
       }
 
       const toolMessage: ToolMessage = {
         role,
         content,
-        tool_call_id,
+        tool_call_id: meta,
       }
 
       this.messages.push(toolMessage)
-    } else if (role === 'assistant' && tool_call_id) {
+    } else if (role === 'assistant' && meta) {
       const message: Message = {
         role,
         content,
-        tool_calls: tool_call_id,
+        tool_calls: meta,
         timestamp: new Date().toISOString(),
       }
 

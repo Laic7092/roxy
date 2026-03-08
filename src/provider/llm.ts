@@ -1,14 +1,15 @@
 import LLMProvider from './base'
 import { RoxyError, ErrorCode } from '../types/errors'
 import { logError, log } from '../utils/error-handler'
+import type { ProviderConfig } from '../config/types'
 
 export class LiteLLMProvider extends LLMProvider {
-  constructor(cfg) {
+  constructor(cfg: ProviderConfig) {
     super(cfg)
   }
 
   async chat(ctx: Ctx): Promise<any> {
-    const { messages, stream, onStreamData, tools, tool_choice } = ctx
+    const { messages, stream, onStreamData, tools, tool_choice, think } = ctx
     const { apiKey, baseURL, model } = this.cfg
 
     const fullURL = baseURL + '/chat/completions'
@@ -18,8 +19,13 @@ export class LiteLLMProvider extends LLMProvider {
       model,
     }
 
+    // 添加 think 参数（如果提供）
+    if (think !== undefined) {
+      requestBody.think = think
+    }
+
     // 如果提供了工具定义，添加到请求体
-    if (tools && tools.length > 0) {
+    if (tools?.length) {
       requestBody.tools = tools
     }
 
@@ -30,7 +36,7 @@ export class LiteLLMProvider extends LLMProvider {
 
     // 如果启用了流式处理，添加相应参数
     if (stream) {
-      requestBody['stream'] = true
+      requestBody.stream = true
     }
 
     try {

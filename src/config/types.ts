@@ -51,6 +51,16 @@ export interface ChannelConfig {
 }
 
 /**
+ * Agent 默认配置
+ */
+export interface AgentDefaultsConfig {
+  /** 默认使用的模型 */
+  model: string
+  /** 思考模式，默认 false */
+  think?: boolean | 'high' | 'medium' | 'low'
+}
+
+/**
  * Roxy 统一配置
  */
 export interface RoxyConfig {
@@ -64,9 +74,7 @@ export interface RoxyConfig {
   }
   /** Agent 默认配置 */
   agents: {
-    defaults: {
-      model: string
-    }
+    defaults: AgentDefaultsConfig
     /** 自定义 Agent 列表 */
     list?: AgentConfig[]
   }
@@ -89,6 +97,7 @@ export const defaultConfig: RoxyConfig = {
   agents: {
     defaults: {
       model: 'ollama/qwen3.5:9b',
+      think: false, // 默认关闭思考模式
     },
   },
   providers: {

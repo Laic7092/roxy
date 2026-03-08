@@ -28,6 +28,7 @@ interface Ctx {
   onStreamData?: (data: string) => void
   tools?: Tool[]
   tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } }
+  think?: boolean | 'high' | 'medium' | 'low'
 }
 
 interface Tool {

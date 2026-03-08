@@ -1,12 +1,8 @@
-interface Options {
-  apiKey: string
-  baseURL: string
-  model: string
-}
+import type { ProviderConfig } from '../config/types'
 
 export default abstract class LLMProvider {
-  cfg: Options
-  constructor(cfg: Options) {
+  cfg: ProviderConfig
+  constructor(cfg: ProviderConfig) {
     this.cfg = cfg
   }
 

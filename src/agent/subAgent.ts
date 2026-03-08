@@ -203,6 +203,7 @@ export class SubAgentManager {
           max_tokens: this.config.maxTokens,
           tools: subAgentTools,
           tool_choice: 'auto',
+          think: false,
         })
 
         const toolCalls = result?.choices?.[0]?.message?.tool_calls

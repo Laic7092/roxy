@@ -215,7 +215,7 @@ export class ToolExecutor {
    * @param context 执行上下文（channelId, sessionId）
    */
   async executeTools(
-    toolCalls: Array<{ name: string; arguments: string; id?: string }>,
+    toolCalls: Array<{ name: string; arguments: string | Record<string, any>; id?: string }>,
     context?: { channelId: string; sessionId: string },
   ): Promise<
     Array<{
@@ -233,18 +233,24 @@ export class ToolExecutor {
     })
 
     const results = await Promise.all(
-      toolCalls.map(async ({ name, arguments: argsStr, id }) => {
+      toolCalls.map(async ({ name, arguments: argsInput, id }) => {
         try {
-          // 解析参数
+          // 解析参数（支持字符串和对象两种格式）
           let args: any
           try {
-            args = JSON.parse(argsStr)
+            if (typeof argsInput === 'string') {
+              args = JSON.parse(argsInput)
+            } else if (typeof argsInput === 'object' && argsInput !== null) {
+              args = argsInput
+            } else {
+              throw new Error('Arguments must be a string or object')
+            }
           } catch (parseError) {
             throw new RoxyError(
               ErrorCode.TOOL_ARGUMENT_PARSE_ERROR,
               `Failed to parse arguments for tool '${name}'`,
               parseError instanceof Error ? parseError : undefined,
-              { rawArguments: argsStr },
+              { rawArguments: argsInput },
             )
           }
 
@@ -270,7 +276,8 @@ export class ToolExecutor {
           logError(roxyError, 'error', 'ToolExecutor')
 
           return {
-            result: { success: false, error: roxyError.message },
+            // 转换为字符串，因为 LLM API 期望 content 是字符串
+            result: JSON.stringify({ success: false, error: roxyError.message }),
             tool_call_id: id || `call_${uuidv4()}`,
             name,
           }
@@ -294,7 +301,7 @@ export class ToolExecutor {
    * 支持多种输出格式：
    * - null/undefined -> ''
    * - string -> 原样返回
-   * - object -> JSON.stringify (缩进 2 空格)
+   * - object -> JSON.stringify (紧凑格式，无缩进)
    * - 其他类型 -> String() 转换
    */
   formatToolOutput(output: unknown): string {
@@ -307,7 +314,8 @@ export class ToolExecutor {
     }
 
     if (typeof output === 'object') {
-      return JSON.stringify(output, null, 2)
+      // 使用紧凑格式，避免换行和引号转义问题
+      return JSON.stringify(output)
     }
 
     return String(output)

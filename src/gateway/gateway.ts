@@ -3,7 +3,7 @@ import { SessionManager } from '../session/manager'
 import { ToolExecutor } from '../tools/ToolExecutor'
 import { AgentLoop } from '../agent/loop'
 import { ContextMng } from '../agent/context'
-import { LiteLLMProvider } from '../provider/llm'
+import { providerManager, OllamaProvider, LiteLLMProvider } from '../provider'
 import type { AgentConfig } from '../agent/types'
 import { AgentRole } from '../agent/types'
 import type {
@@ -276,6 +276,9 @@ export class RoxyGateway {
 
     await this.toolExecutor.initialize()
 
+    // 注册所有 Providers
+    await this.registerAllProviders()
+
     // 注册 Channel
     this.registerChannels()
 
@@ -301,8 +304,9 @@ export class RoxyGateway {
 
     await this.registerAllTools()
 
+    // 从 providerManager 获取默认 provider
     const providerConfig = await this.loadProviderConfig()
-    this.provider = new LiteLLMProvider(providerConfig)
+    this.provider = providerManager.getProvider(providerConfig.providerId)
 
     // 创建 HeartbeatService（需要 provider 和回调）
     this.heartbeatService = new HeartbeatService(
@@ -503,14 +507,54 @@ export class RoxyGateway {
     log('debug', 'Registered SpawnTool', 'RoxyGateway')
   }
 
-  private async loadProviderConfig(): Promise<any> {
+  /**
+   * 注册所有 Providers
+   */
+  private async registerAllProviders(): Promise<void> {
+    // 注册内置 Providers
+    providerManager.registerProvider('ollama', OllamaProvider)
+    providerManager.registerProvider('litellm', LiteLLMProvider)
+
+    // 从配置加载并配置 Providers
     try {
       const config = await loadConfig()
-      const providerName = config.agents.defaults.model.split('/')[0]
-      const modelName = config.agents.defaults.model.split('/')[1]
-      const { apiKey, baseURL } = config.providers[providerName]
+      const providersConfig: Record<string, any> = {}
 
-      return { apiKey, baseURL, model: modelName }
+      // 获取默认 model 对应的 provider
+      const defaultModel = config.agents.defaults.model
+      const defaultProviderId = defaultModel.split('/')[0]
+
+      // 配置所有在配置文件中定义的 providers
+      for (const [providerId, providerCfg] of Object.entries(config.providers)) {
+        providersConfig[providerId] = {
+          ...providerCfg,
+          model: defaultProviderId === providerId ? defaultModel.split('/')[1] : providerCfg.model,
+        }
+      }
+
+      providerManager.initializeFromConfig(providersConfig)
+      log('info', `Providers initialized: ${providerManager.getConfiguredProviders().join(', ')}`, 'RoxyGateway')
+    } catch (error) {
+      logError(
+        new RoxyError(
+          ErrorCode.CONFIG_INVALID,
+          'Failed to load provider config',
+          error instanceof Error ? error : undefined,
+        ),
+        'error',
+        'RoxyGateway',
+      )
+      throw error
+    }
+  }
+
+  private async loadProviderConfig(): Promise<{ providerId: string; model: string }> {
+    try {
+      const config = await loadConfig()
+      const providerId = config.agents.defaults.model.split('/')[0]
+      const modelName = config.agents.defaults.model.split('/')[1]
+
+      return { providerId, model: modelName }
     } catch (error) {
       logError(
         new RoxyError(
@@ -535,10 +579,17 @@ export class RoxyGateway {
       throw new RoxyError(ErrorCode.SYSTEM_ERROR, 'Provider not initialized')
     }
 
+    // 从全局配置加载 think 设置
+    const globalConfig = await loadConfig()
+    const agentConfig: AgentConfig = {
+      ...config,
+      think: config.think ?? globalConfig.agents.defaults.think ?? false,
+    }
+
     const ctx = new ContextMng(this.config.workspace, true)
 
     const agent = new AgentLoop({
-      config,
+      config: agentConfig,
       provider: this.provider,
       toolExecutor: this.toolExecutor,
       bus: this.bus,
