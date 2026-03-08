@@ -64,7 +64,7 @@ async function initConfigFile(force: boolean): Promise<void> {
 }
 
 async function initWorkspaceFiles(): Promise<void> {
-  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md']
+  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md', 'HEARTBEAT.md']
   const today = new Date().toISOString().split('T')[0]
 
   for (const fileName of files) {
@@ -135,7 +135,7 @@ export async function initConfig(): Promise<string> {
  * 确保工作区文件与模板保持同步（用于更新模板后的同步）
  */
 export async function syncWorkspaceTemplates(): Promise<void> {
-  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md']
+  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md', 'HEARTBEAT.md']
   const today = new Date().toISOString().split('T')[0]
 
   for (const fileName of files) {
