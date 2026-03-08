@@ -12,7 +12,8 @@ import { RoxyError, ErrorCode } from '../types/errors'
 import { v4 as uuidv4 } from 'uuid'
 import { loadConfig } from '../config/manager'
 import { SubAgentManager } from '../agent/subAgent'
-import { CronService } from '../cron/CronService'
+import { CronService } from '../services/CronService'
+import { HeartbeatService } from '../services/HeartbeatService'
 
 /**
  * Roxy Gateway - 统一服务入口
@@ -29,6 +30,7 @@ export class RoxyGateway {
   private provider: LiteLLMProvider | null = null
   private subAgentManager: SubAgentManager | null = null
   private cronService: CronService | null = null
+  private heartbeatService: HeartbeatService | null = null
 
   private readonly agents: Map<string, AgentLoop> = new Map()
 
@@ -126,6 +128,20 @@ export class RoxyGateway {
 
     this.bus.on('cron:trigger', async (event) => {
       await this.handleCronTrigger(event)
+    })
+
+    this.bus.on('heartbeat:beat', (event) => {
+      this.dispatchOutput({
+        type: 'heartbeat',
+        channelId: 'system',
+        sessionId: 'system',
+        data: {
+          count: event.count,
+          timestamp: event.timestamp,
+          uptime: event.uptime,
+          interval: event.interval,
+        },
+      })
     })
   }
 
@@ -248,6 +264,9 @@ export class RoxyGateway {
       },
     })
 
+    // 创建 HeartbeatService（需要 provider 和回调）
+    // 等 provider 创建后再初始化
+
     // 注册 CronTool（使用注入的 CronService 实例）
     const { createCronTools } = await import('../tools/CronTool')
     const cronTools = createCronTools(this.cronService, this.bus)
@@ -257,6 +276,49 @@ export class RoxyGateway {
 
     const providerConfig = await this.loadProviderConfig()
     this.provider = new LiteLLMProvider(providerConfig)
+
+    // 创建 HeartbeatService（需要 provider 和回调）
+    this.heartbeatService = new HeartbeatService(this.config.workspace, this.provider, providerConfig.model, {
+      onExecute: async (tasks: string) => {
+        // 执行任务：发布到事件总线，让 Agent 处理
+        return new Promise((resolve) => {
+          const taskId = uuidv4()
+          const channelId = 'heartbeat'
+          const sessionId = 'heartbeat-session'
+
+          // 监听响应
+          const handler = (event: any) => {
+            if (event.sessionId === sessionId && event.taskId === taskId) {
+              this.bus.off('agent:response', handler)
+              resolve(event.content)
+            }
+          }
+          this.bus.on('agent:response', handler)
+
+          // 发布任务
+          this.bus.emit('agent:execute', {
+            taskId,
+            agentId: this.defaultAgentId,
+            channelId,
+            sessionId,
+            content: tasks,
+          })
+
+          // 超时处理
+          setTimeout(() => {
+            this.bus.off('agent:response', handler)
+            resolve('Task execution timeout')
+          }, 5 * 60 * 1000)
+        })
+      },
+      onNotify: async (response: string) => {
+        // 通知结果：可以通过某种渠道通知用户
+        log('info', `Heartbeat task completed: ${response.substring(0, 100)}...`, 'HeartbeatService')
+      },
+    }, {
+      enabled: this.config.heartbeat?.enabled ?? true,
+      intervalSeconds: this.config.heartbeat?.interval ?? 1800, // 默认 30 分钟
+    })
 
     // 创建 SubAgentManager
     this.subAgentManager = new SubAgentManager({
@@ -295,6 +357,9 @@ export class RoxyGateway {
       id: this.defaultAgentId,
       role: AgentRole.MAIN,
     })
+
+    // 启动心跳服务
+    await this.heartbeatService.start()
 
     this._running = true
     log('info', 'Roxy Gateway initialized', 'RoxyGateway')
@@ -408,6 +473,12 @@ export class RoxyGateway {
       await this.cronService.clearAll()
       this.cronService = null
     }
+
+    // 停止 HeartbeatService
+    if (this.heartbeatService) {
+      this.heartbeatService.stop()
+      this.heartbeatService = null
+    }
   }
 
   private async destroyAgent(agentId: string): Promise<boolean> {
@@ -438,5 +509,9 @@ export class RoxyGateway {
 
   getProvider(): LiteLLMProvider | null {
     return this.provider
+  }
+
+  getHeartbeatService(): HeartbeatService | null {
+    return this.heartbeatService
   }
 }

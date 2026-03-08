@@ -8,6 +8,13 @@ export interface GatewayConfig {
   sessionDir?: string
   agents?: AgentConfig[]
   defaultModel?: string
+  /** 心跳服务配置 */
+  heartbeat?: {
+    /** 是否启用心跳，默认 true */
+    enabled?: boolean
+    /** 心跳间隔（秒），默认 1800s (30 分钟) */
+    interval?: number
+  }
 }
 
 /**

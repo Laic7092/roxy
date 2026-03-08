@@ -1,4 +1,4 @@
-import { CronService, CronJobType, type CronCallbacks } from '../cron/CronService'
+import { CronService, CronJobType, type CronCallbacks } from '../services/CronService'
 import type { Bus } from '../bus/instance'
 
 /**

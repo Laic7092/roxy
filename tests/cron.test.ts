@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { CronService, CronJobType } from '../src/cron/CronService'
+import { CronService, CronJobType } from '../src/services/CronService'
 import * as fs from 'fs'
 import * as path from 'path'
 
