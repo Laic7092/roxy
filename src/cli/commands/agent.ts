@@ -13,7 +13,6 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
     try {
       // 加载配置
       const config = await loadConfig()
-      const workspace = config.workspace
 
       const sessionId = options.session || 'cli:default'
 
@@ -29,10 +28,7 @@ AgentCommand.description('Start an interactive conversation with the AI agent')
 
       // 创建 Gateway
       const gateway = new RoxyGateway({
-        config: {
-          workspace,
-          defaultModel: config.agents.defaults.model,
-        },
+        config,
       })
 
       // 创建 CLI Channel
