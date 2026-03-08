@@ -115,18 +115,22 @@ export class AgentLoop {
         this.session.addMessage('assistant', content || '', toolCalls)
         await this.sessionManager.save(ctx.sessionId)
 
-        this.bus.emit('agent:response', {
-          agentId: ctx.agentId,
-          taskId: ctx.taskId,
-          channelId: ctx.channelId,
-          sessionId: ctx.sessionId,
-          content,
-          toolCalls,
-          timestamp: new Date(),
-        })
-
         aiResponse = content
         toolCallsResult = toolCalls
+
+        // 只有在没有工具调用时才发送 response 事件
+        // 有工具调用时，等待工具执行完成后再发送最终响应
+        if (!toolCalls || toolCalls.length === 0) {
+          this.bus.emit('agent:response', {
+            agentId: ctx.agentId,
+            taskId: ctx.taskId,
+            channelId: ctx.channelId,
+            sessionId: ctx.sessionId,
+            content,
+            toolCalls,
+            timestamp: new Date(),
+          })
+        }
 
         if (toolCalls && toolCalls.length > 0) {
           hasToolCalls = true
