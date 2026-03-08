@@ -39,6 +39,7 @@ export function createSpawnTools(manager: SubAgentManager) {
       ) => {
         try {
           const { task, label } = args
+          // 从上下文获取 channelId 和 sessionId，作为父 Agent 的上下文
           const sessionId = context?.sessionId || 'unknown'
           const channelId = context?.channelId || 'unknown'
           const result = await manager.spawn(task, label, channelId, sessionId)

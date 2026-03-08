@@ -4,30 +4,29 @@
  * 职责：
  * - 管理后台 SubAgent 任务
  * - 执行 SubAgent 任务循环
- * - 通知主 Agent 任务结果
+ * - 通过事件总线通知主 Agent 任务结果
  */
 
 import { v4 as uuidv4 } from 'uuid'
 import type { LiteLLMProvider } from '../provider/llm'
-import type { SessionManager } from '../session/manager'
 import type { ToolExecutor } from '../tools/ToolExecutor'
+import type { Bus } from '../bus/instance'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 
 export interface SubAgentTask {
   id: string
   label: string
   task: string
-  sessionId: string
-  channelId: string
+  parentChannelId: string
+  parentSessionId: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   result?: string
   error?: string
   createdAt: Date
   completedAt?: Date
-  // 父 Agent 的上下文（用于返回结果）
-  parentChannelId: string
-  parentSessionId: string
 }
 
 export interface SubAgentConfig {
@@ -45,15 +44,10 @@ export interface SubAgentConfig {
 
 export interface SubAgentManagerDeps {
   provider: LiteLLMProvider
-  sessionManager: SessionManager
+  bus: Bus
   toolExecutor: ToolExecutor
   config?: SubAgentConfig
   workspace: string
-}
-
-export interface SubAgentCallbacks {
-  onSubAgentStart?: (task: SubAgentTask) => void
-  onSubAgentComplete?: (task: SubAgentTask, success: boolean) => void
 }
 
 export class SubAgentManager {
@@ -62,23 +56,22 @@ export class SubAgentManager {
   private static readonly DEFAULT_MAX_TOKENS = 4096
 
   private provider: LiteLLMProvider
-  private sessionManager: SessionManager
+  private bus: Bus
   private toolExecutor: ToolExecutor
   private workspace: string
   private config: Required<SubAgentConfig>
-  private callbacks: SubAgentCallbacks
 
-  // 运行中的任务
-  private runningTasks: Map<string, Promise<void>> = new Map()
+  // 运行中的任务和取消控制器
+  private runningTasks: Map<string, { promise: Promise<void>; abortController: AbortController }> =
+    new Map()
   // 会话 -> 任务 ID 映射
   private sessionTasks: Map<string, Set<string>> = new Map()
 
-  constructor(deps: SubAgentManagerDeps, callbacks?: SubAgentCallbacks) {
+  constructor(deps: SubAgentManagerDeps) {
     this.provider = deps.provider
-    this.sessionManager = deps.sessionManager
+    this.bus = deps.bus
     this.toolExecutor = deps.toolExecutor
     this.workspace = deps.workspace
-    this.callbacks = callbacks || {}
 
     // 合并默认配置
     this.config = {
@@ -113,19 +106,20 @@ export class SubAgentManager {
       id: taskId,
       label: displayLabel,
       task,
-      sessionId: parentSessionId ? `subagent:${parentSessionId}:${taskId}` : 'subagent:' + taskId,
-      channelId: parentChannelId || 'subagent',
-      status: 'pending',
-      createdAt: new Date(),
       parentChannelId: parentChannelId || 'subagent',
       parentSessionId: parentSessionId || 'subagent',
+      status: 'pending',
+      createdAt: new Date(),
     }
 
+    // 创建取消控制器
+    const abortController = new AbortController()
+
     // 创建执行 Promise
-    const executionPromise = this.runSubAgent(subAgentTask)
+    const executionPromise = this.runSubAgent(subAgentTask, abortController.signal)
 
     // 存储任务引用
-    this.runningTasks.set(taskId, executionPromise)
+    this.runningTasks.set(taskId, { promise: executionPromise, abortController })
 
     // 更新会话映射（使用父会话 ID）
     if (parentSessionId) {
@@ -153,8 +147,15 @@ export class SubAgentManager {
 
     log('debug', `Spawned subagent [${taskId}]: ${displayLabel}`, 'SubAgentManager')
 
-    // 通过回调通知，而非直接发布事件
-    this.callbacks.onSubAgentStart?.(subAgentTask)
+    // 通过事件总线通知主 Agent
+    this.bus.emit('subagent:start', {
+      taskId,
+      label: displayLabel,
+      task,
+      parentChannelId: parentChannelId || 'subagent',
+      parentSessionId: parentSessionId || 'subagent',
+      timestamp: new Date(),
+    })
 
     return `Subagent [${displayLabel}] started (id: ${taskId}). I'll notify you when it completes.`
   }
@@ -162,29 +163,39 @@ export class SubAgentManager {
   /**
    * 执行 SubAgent 任务
    */
-  private async runSubAgent(task: SubAgentTask): Promise<void> {
+  private async runSubAgent(
+    task: SubAgentTask,
+    signal: AbortSignal,
+  ): Promise<void> {
     log('debug', `Subagent [${task.id}] starting task: ${task.label}`, 'SubAgentManager')
 
     try {
       task.status = 'running'
 
-      // 获取或创建会话
-      const session = await this.sessionManager.getOrCreate(task.sessionId)
+      // 构建消息历史（内存中，不持久化）
+      const messages: Array<{
+        role: string
+        content: string
+        tool_calls?: any[]
+        tool_call_id?: string
+      }> = [
+        { role: 'system', content: this.buildSystemPrompt() },
+        { role: 'user', content: task.task },
+      ]
 
-      // 添加用户消息
-      session.addMessage('user', task.task)
-
-      // 构建消息历史
-      let messages = this.buildMessages(session.messages)
-
-      // 获取工具定义
-      const tools = await this.toolExecutor.getToolDefinitions()
+      // 为 SubAgent 创建独立的工具注册表
+      const subAgentTools = await this.buildSubAgentTools()
 
       // 执行 Agent 循环
       let iteration = 0
       let finalResult: string | null = null
 
       while (iteration < this.config.maxIterations) {
+        // 检查是否被取消
+        if (signal.aborted) {
+          throw new RoxyError(ErrorCode.SYSTEM_ERROR, 'Subagent cancelled by user')
+        }
+
         iteration++
 
         // 调用 LLM
@@ -193,7 +204,7 @@ export class SubAgentManager {
           model: this.config.model,
           temperature: this.config.temperature,
           max_tokens: this.config.maxTokens,
-          tools,
+          tools: subAgentTools,
           tool_choice: 'auto',
         })
 
@@ -202,34 +213,35 @@ export class SubAgentManager {
         if (toolCalls && toolCalls.length > 0) {
           // 添加助手消息
           const { content, tool_calls } = result.choices[0].message
-          session.addMessage('assistant', content || '', tool_calls)
+          messages.push({
+            role: 'assistant',
+            content: content || '',
+            tool_calls,
+          })
 
-          // 执行工具调用（传递 SubAgent 自己的上下文）
+          // 执行工具调用
           const toolResults = await this.toolExecutor.executeTools(
             toolCalls.map((call: any) => ({
               name: call.function.name,
               arguments: call.function.arguments,
               id: call.id,
             })),
-            { channelId: task.channelId, sessionId: task.sessionId },
+            { channelId: task.parentChannelId, sessionId: task.parentSessionId },
           )
 
           // 添加工具结果
           for (const toolResult of toolResults) {
-            session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
-            // 注意：不发布工具结果事件到主 Agent 通道，因为这是 SubAgent 的内部执行
-            // 只在 SubAgent 自己的会话中记录
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolResult.tool_call_id,
+              content: toolResult.result,
+            })
           }
-
-          // 重新构建消息
-          messages = this.buildMessages(session.messages)
         } else {
           // 没有工具调用，获取最终响应
           const { content } = result.choices[0].message
           if (content) {
-            session.addMessage('assistant', content)
             finalResult = content
-            // 注意：不直接发布响应事件，由 announceResult 通过 subagent:complete 事件通知
           }
           break
         }
@@ -245,11 +257,17 @@ export class SubAgentManager {
 
       log('debug', `Subagent [${task.id}] completed successfully`, 'SubAgentManager')
 
-      // 通知主 Agent
+      // 通过事件总线通知主 Agent
       await this.announceResult(task, 'ok')
     } catch (error) {
-      task.status = 'failed'
-      task.error = error instanceof Error ? error.message : 'Unknown error'
+      // 检查是否是取消导致的错误
+      if (signal.aborted) {
+        task.status = 'cancelled'
+        task.error = 'Subagent cancelled by user'
+      } else {
+        task.status = 'failed'
+        task.error = error instanceof Error ? error.message : 'Unknown error'
+      }
       task.completedAt = new Date()
 
       logError(
@@ -264,7 +282,7 @@ export class SubAgentManager {
         'SubAgentManager',
       )
 
-      // 通知主 Agent
+      // 通过事件总线通知主 Agent
       await this.announceResult(task, 'error')
 
       throw error
@@ -272,27 +290,22 @@ export class SubAgentManager {
   }
 
   /**
-   * 构建消息历史
+   * 为 SubAgent 构建独立的工具列表
+   * 排除 spawn 工具，防止递归 spawn
    */
-  private buildMessages(sessionMessages: any[]): any[] {
-    return [
-      { role: 'system', content: this.buildSystemPrompt() },
-      ...sessionMessages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-        tool_calls: (msg as any).tool_calls,
-        tool_call_id: (msg as any).tool_call_id,
-      })),
-    ]
+  private async buildSubAgentTools(): Promise<any[]> {
+    const allTools = await this.toolExecutor.getToolDefinitions()
+    // 排除 spawn 工具，防止 SubAgent 再 spawn 子任务
+    return allTools.filter((tool: any) => tool.function.name !== 'spawn')
   }
 
   /**
-   * 构建系统提示词
+   * 构建系统提示词（支持技能系统）
    */
   private buildSystemPrompt(): string {
     const timeCtx = new Date().toISOString()
-
-    return `# SubAgent
+    const parts = [
+      `# SubAgent
 
 ${timeCtx}
 
@@ -300,22 +313,69 @@ You are a subagent spawned by the main agent to complete a specific task.
 Stay focused on the assigned task. Your final response will be reported back to the main agent.
 
 ## Workspace
-${this.workspace}
+${this.workspace}`,
+    ]
 
-## Guidelines
-- Use available tools to accomplish the task
-- Provide a clear final response when done
-- Keep responses concise and focused`
+    // 加载技能系统
+    const skillsSummary = this.loadSkillsSummary()
+    if (skillsSummary) {
+      parts.push(`## Skills
+
+Read SKILL.md with read_file to use a skill.
+
+${skillsSummary}`)
+    }
+
+    return parts.join('\n\n')
+  }
+
+  /**
+   * 加载技能摘要
+   */
+  private loadSkillsSummary(): string | null {
+    const skillMdPath = join(this.workspace, 'SKILL.md')
+    if (!existsSync(skillMdPath)) {
+      return null
+    }
+
+    try {
+      const content = readFileSync(skillMdPath, 'utf-8')
+      // 返回技能文件内容作为摘要
+      return content.trim()
+    } catch {
+      return null
+    }
   }
 
   /**
    * 通知主 Agent 任务结果
    */
   private async announceResult(task: SubAgentTask, status: 'ok' | 'error'): Promise<void> {
-    // 通过回调通知，而非直接发布事件
-    this.callbacks.onSubAgentComplete?.(task, status === 'ok')
+    const statusText = status === 'ok' ? 'completed successfully' : 'failed'
 
-    log('debug', `Subagent [${task.id}] announced result via callback`, 'SubAgentManager')
+    // 构建通知内容（类似 Python 版本）
+    const announceContent = `[Subagent '${task.label}' ${statusText}]
+
+Task: ${task.task}
+
+Result:
+${task.result || task.error}
+
+Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs.`
+
+    // 通过 subagent:complete 事件通知
+    this.bus.emit('subagent:complete', {
+      taskId: task.id,
+      label: task.label,
+      parentChannelId: task.parentChannelId,
+      parentSessionId: task.parentSessionId,
+      result: announceContent,
+      success: status === 'ok',
+      error: status === 'error' ? task.error : undefined,
+      timestamp: new Date(),
+    })
+
+    log('debug', `Subagent [${task.id}] announced result via event bus`, 'SubAgentManager')
   }
 
   /**
@@ -330,8 +390,10 @@ ${this.workspace}
     let cancelled = 0
 
     for (const taskId of taskIds) {
-      const taskPromise = this.runningTasks.get(taskId)
-      if (taskPromise) {
+      const taskRef = this.runningTasks.get(taskId)
+      if (taskRef) {
+        // 真正中断任务
+        taskRef.abortController.abort()
         this.runningTasks.delete(taskId)
         cancelled++
         log('info', `Cancelled subagent [${taskId}] for session ${sessionId}`, 'SubAgentManager')

@@ -380,37 +380,12 @@ export class RoxyGateway {
     )
 
     // 创建 SubAgentManager
-    this.subAgentManager = new SubAgentManager(
-      {
-        provider: this.provider,
-        sessionManager: this.sessionManager,
-        toolExecutor: this.toolExecutor,
-        workspace: this.config.workspace,
-      },
-      {
-        onSubAgentStart: (task) => {
-          this.bus.emit('subagent:start', {
-            taskId: task.id,
-            label: task.label,
-            task: task.task,
-            parentChannelId: task.parentChannelId,
-            parentSessionId: task.parentSessionId,
-          })
-        },
-        onSubAgentComplete: (task, success) => {
-          this.bus.emit('subagent:complete', {
-            taskId: task.id,
-            label: task.label,
-            parentChannelId: task.parentChannelId,
-            parentSessionId: task.parentSessionId,
-            result: task.result || '',
-            success,
-            error: task.error,
-            timestamp: new Date(),
-          })
-        },
-      },
-    )
+    this.subAgentManager = new SubAgentManager({
+      provider: this.provider,
+      bus: this.bus,
+      toolExecutor: this.toolExecutor,
+      workspace: this.config.workspace,
+    })
 
     // 注册 SpawnTool（需要 SubAgentManager）
     await this.registerSpawnTool()

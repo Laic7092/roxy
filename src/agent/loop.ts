@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid'
 import type { LiteLLMProvider } from '../provider/llm'
 import type { ContextMng } from './context'
 import type { Session, SessionManager } from '../session/manager'
@@ -66,8 +67,24 @@ export class AgentLoop {
       }
     })
 
-    this.bus.on('subagent:complete', () => {
-      // SubAgent 完成事件，当前无需处理
+    // 处理 SubAgent 完成事件
+    this.bus.on('subagent:complete', async (event) => {
+      // 将 SubAgent 的结果作为系统消息注入到主 Agent 会话
+      // 这会触发主 Agent 重新处理并生成用户友好的响应
+      if (this.session && event.parentSessionId === this.session.id) {
+        // 添加 SubAgent 完成通知到会话
+        this.session.addMessage('system', event.result)
+        await this.sessionManager.save(this.session.id)
+
+        // 重新触发 Agent 执行，处理 SubAgent 的结果
+        this.bus.emit('agent:execute', {
+          taskId: uuidv4().slice(0, 8),
+          agentId: this.config.id,
+          channelId: event.parentChannelId,
+          sessionId: event.parentSessionId,
+          content: event.result,
+        })
+      }
     })
   }
 
