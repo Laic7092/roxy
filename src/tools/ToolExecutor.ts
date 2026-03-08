@@ -156,8 +156,9 @@ export class ToolExecutor {
         availableTools: Array.from(this.tools.keys()),
       })
       logError(error, 'error', 'ToolExecutor')
+      // 返回字符串而不是对象，避免 LLM API 格式错误
       return {
-        result: { success: false, error: error.message },
+        result: `Error: Tool '${toolName}' not found. Available tools: ${Array.from(this.tools.keys()).join(', ')}`,
         tool_call_id: toolCallId,
       }
     }
@@ -190,8 +191,9 @@ export class ToolExecutor {
 
       logError(roxyError, 'error', 'ToolExecutor')
 
+      // 返回字符串而不是对象
       return {
-        result: { success: false, error: roxyError.message },
+        result: `Error: ${roxyError.message}`,
         tool_call_id: toolCallId,
       }
     }

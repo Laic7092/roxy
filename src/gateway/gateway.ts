@@ -247,11 +247,10 @@ export class RoxyGateway {
   private async registerAllTools(): Promise<void> {
     const { fileSystemTools } = await import('../tools/FileSystemTools')
     const { commandTools } = await import('../tools/CommandTools')
-    const { skillTools } = await import('../tools/SkillTools')
     const { createCronTools } = await import('../tools/CronTool')
 
     // 基础工具
-    this.toolExecutor.registerTools([...fileSystemTools, ...commandTools, ...skillTools])
+    this.toolExecutor.registerTools([...fileSystemTools, ...commandTools])
 
     // CronTool（全局单例，执行时获取上下文）
     const cronTools = createCronTools(this.config.workspace, this.bus)

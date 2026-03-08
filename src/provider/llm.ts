@@ -1,75 +1,10 @@
 import LLMProvider from './base'
 import { RoxyError, ErrorCode } from '../types/errors'
-import { logError, log, sleep } from '../utils/error-handler'
+import { logError, log } from '../utils/error-handler'
 
 export class LiteLLMProvider extends LLMProvider {
   constructor(cfg) {
     super(cfg)
-  }
-
-  /**
-   * 带重试机制的 chat 方法
-   *
-   * @param ctx 上下文
-   * @param maxRetries 最大重试次数
-   */
-  async chatWithRetry(ctx: Ctx, maxRetries: number = 3): Promise<any> {
-    let lastError: Error | undefined
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await this.chat(ctx)
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error))
-
-        // 检查是否应该重试
-        if (!this.shouldRetry(lastError) || attempt === maxRetries) {
-          break
-        }
-
-        // 计算指数退避延迟
-        const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
-
-        log(
-          'warn',
-          `LLM call failed，重试中 (attempt ${attempt}/${maxRetries}) after ${backoffMs}ms`,
-          'LiteLLMProvider',
-          { error: lastError.message },
-        )
-
-        await sleep(backoffMs)
-      }
-    }
-
-    const roxyError = RoxyError.llm(`LLM call failed after ${maxRetries} attempts`, lastError, {
-      lastError: lastError?.message,
-      attempts: maxRetries,
-    })
-    logError(roxyError, 'error', 'LiteLLMProvider')
-    throw roxyError
-  }
-
-  /**
-   * 判断错误是否应该重试
-   */
-  private shouldRetry(error: Error): boolean {
-    // 可重试的错误关键字
-    const retryableMessages = [
-      'network',
-      'timeout',
-      'rate limit',
-      'too many requests',
-      'server error',
-      'gateway',
-      'service unavailable',
-      'temporarily unavailable',
-      'econnreset',
-      'econnrefused',
-      'enotfound',
-    ]
-
-    const message = error.message.toLowerCase()
-    return retryableMessages.some((keyword) => message.includes(keyword))
   }
 
   async chat(ctx: Ctx): Promise<any> {

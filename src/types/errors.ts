@@ -166,40 +166,6 @@ export class RoxyError extends Error {
 }
 
 /**
- * 判断错误是否为可恢复错误
- *
- * 可恢复错误包括：网络错误、超时、速率限制等
- */
-export function isRecoverableError(error: Error): boolean {
-  if (error instanceof RoxyError) {
-    const recoverableCodes: ErrorCode[] = [
-      ErrorCode.NETWORK_ERROR,
-      ErrorCode.CONNECTION_TIMEOUT,
-      ErrorCode.LLM_TIMEOUT,
-      ErrorCode.LLM_RATE_LIMITED,
-      ErrorCode.TIMEOUT,
-      ErrorCode.RETRY_ATTEMPT,
-    ]
-    return recoverableCodes.includes(error.code)
-  }
-
-  // 检查错误消息中的关键字
-  const recoverableMessages = [
-    'network',
-    'timeout',
-    'rate limit',
-    'too many requests',
-    'service unavailable',
-    'gateway',
-    'temporarily unavailable',
-    'retry',
-  ]
-
-  const message = error.message.toLowerCase()
-  return recoverableMessages.some((keyword) => message.includes(keyword))
-}
-
-/**
  * 判断错误是否为致命错误（不可恢复）
  */
 export function isFatalError(error: Error): boolean {

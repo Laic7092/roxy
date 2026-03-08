@@ -110,9 +110,10 @@ export class SkillsLoader {
       return this.skillContentCache.get(name)!
     }
 
+    // 内置技能优先级最高
     const paths = [
-      join(this.workspace, 'skills', name, 'SKILL.md'),
       join(this.builtinDir, name, 'SKILL.md'),
+      join(this.workspace, 'skills', name, 'SKILL.md'),
     ]
 
     for (const p of paths) {
@@ -133,9 +134,10 @@ export class SkillsLoader {
     }
 
     const skills: Map<string, SkillMeta> = new Map()
+    // 先扫描 workspace，再扫描内置，让内置技能覆盖同名 workspace 技能
     const dirs = [
-      { path: this.builtinDir, source: 'builtin' as const },
       { path: join(this.workspace, 'skills'), source: 'workspace' as const },
+      { path: this.builtinDir, source: 'builtin' as const },
     ]
 
     for (const { path, source } of dirs) {
@@ -148,7 +150,7 @@ export class SkillsLoader {
               await access(skillPath)
               const content = await readFile(skillPath, 'utf-8')
               const { name, description } = this.parseFrontmatter(content)
-              // workspace 技能覆盖同名内置技能
+              // 内置技能覆盖同名 workspace 技能
               skills.set(entry.name, { name: entry.name, description, source })
             } catch {}
           }

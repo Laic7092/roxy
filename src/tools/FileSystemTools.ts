@@ -4,9 +4,17 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// 获取内置技能目录（处理开发和构建两种情况）
+const getBuiltinSkillsDir = () => {
+  if (__dirname.includes('/dist/') || __dirname.endsWith('/dist')) {
+    return join(__dirname, '..', 'src', 'skills')
+  }
+  return join(__dirname, '..', 'skills')
+}
+
 /**
  * 读取文件内容
- * @param filePath 文件路径（相对于workspace）
+ * @param filePath 文件路径（相对于 workspace，或 @skills/{name}/SKILL.md 访问内置技能）
  * @param workspace 工作空间路径
  * @returns 文件内容
  */
@@ -15,6 +23,23 @@ export async function readFile(
   workspace: string,
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   try {
+    // 支持特殊前缀 @skills/{name}/SKILL.md 访问内置技能
+    if (filePath.startsWith('@skills/')) {
+      const skillName = filePath.replace('@skills/', '').replace('/SKILL.md', '')
+      const builtinDir = getBuiltinSkillsDir()
+      const skillPath = join(builtinDir, skillName, 'SKILL.md')
+      const content = await fs.readFile(skillPath, 'utf-8')
+      return { success: true, content }
+    }
+
+    // 支持特殊前缀 @workspace/skills/{name}/SKILL.md 访问 workspace 技能
+    if (filePath.startsWith('@workspace/skills/')) {
+      const skillName = filePath.replace('@workspace/skills/', '').replace('/SKILL.md', '')
+      const skillPath = join(workspace, 'skills', skillName, 'SKILL.md')
+      const content = await fs.readFile(skillPath, 'utf-8')
+      return { success: true, content }
+    }
+
     // 验证路径安全性，防止路径遍历攻击
     const fullPath = resolve(join(workspace, filePath))
 
@@ -37,7 +62,7 @@ export async function readFile(
 
 /**
  * 写入文件内容
- * @param filePath 文件路径（相对于workspace）
+ * @param filePath 文件路径（相对于 workspace）
  * @param content 文件内容
  * @param workspace 工作空间路径
  * @returns 操作结果
@@ -74,7 +99,7 @@ export async function writeFile(
 
 /**
  * 列出目录内容
- * @param dirPath 目录路径（相对于workspace）
+ * @param dirPath 目录路径（相对于 workspace）
  * @param workspace 工作空间路径
  * @returns 目录内容列表
  */
@@ -142,13 +167,13 @@ function isSensitivePath(path: string): boolean {
 export const fileSystemTools = [
   {
     name: 'readFile',
-    description: 'Read content from a file in the workspace',
+    description: 'Read content from a file. Use @skills/{name}/SKILL.md to load built-in skills.',
     parameters: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
-          description: 'Path to the file to read (relative to workspace)',
+          description: 'Path to the file (relative to workspace, or @skills/{name}/SKILL.md)',
         },
       },
       required: ['filePath'],

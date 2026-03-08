@@ -5,7 +5,7 @@ import type { ToolExecutor } from '../tools/ToolExecutor'
 import type { Bus } from '../bus/instance'
 import type { AgentConfig } from './types'
 import { RoxyError, ErrorCode } from '../types/errors'
-import { logError, log, withTimeout } from '../utils/error-handler'
+import { logError, log } from '../utils/error-handler'
 
 export interface AgentLoopDeps {
   config: AgentConfig
@@ -39,7 +39,6 @@ export interface RunResult {
 export class AgentLoop {
   private static readonly MAX_ITERATIONS = 20
   private static readonly MAX_TIME_MS = 5 * 60 * 1000
-  private static readonly LLM_TIMEOUT_MS = 30000
 
   private config: AgentConfig
   private provider: LiteLLMProvider
@@ -102,18 +101,14 @@ export class AgentLoop {
       hasToolCalls = false
 
       try {
-        const result = await withTimeout(
-          this.provider.chat({
-            messages: contextMessages,
-            model: this.config.model || this.provider.cfg.model,
-            stream: true,
-            onStreamData: (chunk) => this.handleStreamData(ctx, chunk),
-            tools,
-            tool_choice: 'auto',
-          }),
-          AgentLoop.LLM_TIMEOUT_MS,
-          'LLM chat',
-        )
+        const result = await this.provider.chat({
+          messages: contextMessages,
+          model: this.config.model || this.provider.cfg.model,
+          stream: true,
+          onStreamData: (chunk) => this.handleStreamData(ctx, chunk),
+          tools,
+          tool_choice: 'auto',
+        })
 
         const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
 
@@ -193,9 +188,10 @@ export class AgentLoop {
 
         logError(roxyError, 'warn', 'AgentLoop')
 
-        if (!isRecoverableError(roxyError)) {
-          throw roxyError
-        }
+        // 所有错误都添加到 session，不直接抛出
+        this.session.addMessage('assistant', `抱歉，发生错误：${roxyError.message}`)
+        await this.sessionManager.save(ctx.sessionId)
+        break
       }
     }
 
@@ -221,9 +217,4 @@ export class AgentLoop {
   getSession(): Session | null {
     return this.session
   }
-}
-
-function isRecoverableError(error: Error): boolean {
-  const recoverableMessages = ['network', 'timeout', 'rate limit', 'too many requests', 'service unavailable', 'gateway']
-  return recoverableMessages.some((keyword) => error.message.toLowerCase().includes(keyword))
 }

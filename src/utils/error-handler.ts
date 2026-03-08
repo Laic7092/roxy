@@ -4,7 +4,7 @@
  * 提供统一的错误处理、日志记录和转换功能
  */
 
-import { RoxyError, ErrorCode, isRecoverableError } from '../types/errors'
+import { RoxyError, ErrorCode } from '../types/errors'
 
 /**
  * 日志记录级别
@@ -245,84 +245,6 @@ export async function safeAsync<T>(
     const roxyError = handleError(error, context, defaultCode)
     return [null, roxyError]
   }
-}
-
-/**
- * 创建错误恢复包装器
- *
- * 自动重试可恢复的错误
- *
- * @param fn 要执行的异步函数
- * @param context 错误发生的上下文
- * @param maxRetries 最大重试次数
- * @param baseDelay 基础延迟时间（毫秒）
- */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  context: string,
-  maxRetries: number = 3,
-  baseDelay: number = 1000,
-): Promise<T> {
-  let lastError: Error | undefined
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn()
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error))
-
-      // 检查是否应该重试
-      if (!isRecoverableError(lastError) || attempt === maxRetries) {
-        break
-      }
-
-      // 计算指数退避延迟
-      const backoffMs = Math.min(baseDelay * Math.pow(2, attempt - 1), 10000)
-
-      log(
-        'warn',
-        `${context} failed, retrying (attempt ${attempt}/${maxRetries}) after ${backoffMs}ms`,
-        undefined,
-        { error: lastError.message },
-      )
-
-      await sleep(backoffMs)
-    }
-  }
-
-  // 所有重试都失败
-  throw handleError(lastError, context, ErrorCode.MAX_RETRIES_EXCEEDED)
-}
-
-/**
- * 带超时的异步操作
- *
- * @param promise 要执行的 Promise
- * @param timeoutMs 超时时间（毫秒）
- * @param context 错误发生的上下文
- */
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  context: string,
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        reject(
-          new RoxyError(ErrorCode.TIMEOUT, `${context}: Operation timed out after ${timeoutMs}ms`),
-        )
-      }, timeoutMs),
-    ),
-  ])
-}
-
-/**
- * 睡眠指定时间
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
