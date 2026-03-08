@@ -1,6 +1,7 @@
 import { writeFile, mkdir, readFile, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { constants } from 'node:fs'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
@@ -9,6 +10,9 @@ export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
 export const CONFIG_PATH = join(ROOT_PATH, 'config.json')
 export const SESSIONS_PATH = join(ROOT_PATH, 'sessions')
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+export const TEMPLATE_PATH = join(__dirname, '../../src/template')
 
 const defaultConfig = {
   workspace: WROKSPACE_PATH,
@@ -60,96 +64,33 @@ async function initConfigFile(force: boolean): Promise<void> {
 }
 
 async function initWorkspaceFiles(): Promise<void> {
-  const files = [
-    {
-      name: 'AGENT.md',
-      content: `# Agent Instructions
+  const files = ['AGENT.md', 'SOUL.md', 'USER.md', 'MEMORY.md', 'HISTORY.md']
+  const today = new Date().toISOString().split('T')[0]
 
-You are a helpful AI assistant. Be concise, accurate, and friendly.
-
-## Guidelines
-
-- Always explain what you're doing before taking actions
-- Ask for clarification when the request is ambiguous
-- Use tools to help accomplish tasks
-- Remember important information in MEMORY.md; past events are logged in HISTORY.md
-`,
-    },
-    {
-      name: 'SOUL.md',
-      content: `# Soul
-
-I am roxy, a lightweight AI assistant.
-
-## Personality
-
-- Helpful and friendly
-- Concise and to the point
-- Curious and eager to learn
-
-## Values
-
-- Accuracy over speed
-- User privacy and safety
-- Transparency in actions
-`,
-    },
-    {
-      name: 'USER.md',
-      content: `# User
-
-Information about the user goes here.
-
-## Preferences
-
-- Communication style: (casual/formal)
-- Timezone: (your timezone)
-- Language: (your preferred language)
-`,
-    },
-    {
-      name: 'MEMORY.md',
-      content: `# Memory
-
-This file stores important information and context.
-
-## Session Information
-
-- Last updated: ${new Date().toISOString().split('T')[0]}
-- Sessions: 0
-
-## Key Points
-
-- No memory entries yet.
-`,
-    },
-    {
-      name: 'HISTORY.md',
-      content: `# History
-
-Append-only log of significant events and conversations.
-
-## Usage
-
-Use grep to search: grep -i "keyword" HISTORY.md
-
-## Log
-
-${new Date().toISOString().split('T')[0]} - Workspace initialized
-`,
-    },
-  ]
-
-  for (const file of files) {
-    const filePath = join(WROKSPACE_PATH, file.name)
-    const exists = await fileExists(filePath)
+  for (const fileName of files) {
+    const templatePath = join(TEMPLATE_PATH, fileName)
+    const workspacePath = join(WROKSPACE_PATH, fileName)
+    const exists = await fileExists(workspacePath)
 
     if (exists) {
       continue
     }
 
-    await writeFile(filePath, file.content, 'utf-8')
-    log('success', `Workspace: ${file.name}`, 'config/manager')
+    try {
+      let content = await readFile(templatePath, 'utf-8')
+      // 替换模板变量
+      content = content.replace(/{{DATE}}/g, today)
+
+      await writeFile(workspacePath, content, 'utf-8')
+      log('success', `Workspace: ${fileName}`, 'config/manager')
+    } catch (error) {
+      logError(
+        new RoxyError(ErrorCode.CONFIG_INVALID, `读取模板失败：${fileName}`),
+        'error',
+        'config/manager',
+      )
+      throw error
+    }
   }
 }
 
