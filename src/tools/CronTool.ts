@@ -3,52 +3,49 @@ import type { Bus } from '../bus/instance'
 
 /**
  * 创建 CronTool（工厂函数）
- *
- * @param cronService - CronService 实例（由 Gateway 注入）
- * @param _bus - 事件总线（用于回调）
  */
 export function createCronTools(cronService: CronService, _bus: Bus) {
   return [
     {
       name: 'cron',
       description:
-        'Schedule reminders and recurring tasks. Supports three modes: reminder (direct message), task (agent executes), and one-time (runs once then deletes). Use cron expressions, intervals, or specific datetimes.',
+        'Schedule reminders and recurring tasks. Supports three modes: reminder, task, and one-time.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            description: 'Action to perform: "add", "list", "remove", "pause", "resume"',
+            description: 'Action: "add", "list", "remove", "pause", "resume"',
             enum: ['add', 'list', 'remove', 'pause', 'resume'],
           },
           message: {
             type: 'string',
-            description: 'Message content for the reminder or task (required for "add" action)',
+            description: 'Message content (required for "add")',
           },
           everySeconds: {
             type: 'number',
-            description: 'Interval in seconds (e.g., 600 for every 10 minutes)',
+            description: 'Interval in seconds',
             minimum: 1,
           },
           cronExpr: {
             type: 'string',
-            description: 'Cron expression (e.g., "0 8 * * *" for daily at 8am)',
+            description: 'Cron expression',
           },
           at: {
             type: 'string',
-            description: 'ISO datetime string for one-time execution (e.g., "2025-03-06T14:30:00")',
+            description: 'ISO datetime for one-time execution',
           },
           tz: {
             type: 'string',
-            description: 'Timezone in IANA format (e.g., "America/Vancouver")',
+            description: 'Timezone (IANA format)',
           },
           jobId: {
             type: 'string',
-            description: 'Job ID for remove/pause/resume actions (required for those actions)',
+            description: 'Job ID for remove/pause/resume',
           },
           type: {
             type: 'string',
-            description: 'Job type: "reminder" (default), "task", or "one_time"',
+            description: 'Job type: "reminder", "task", or "one_time"',
             enum: ['reminder', 'task', 'one_time'],
           },
         },
@@ -67,33 +64,23 @@ export function createCronTools(cronService: CronService, _bus: Bus) {
         },
         _workspace: string,
         context?: { channelId: string; sessionId: string; isCronExecution?: boolean },
-      ) => {
+      ): Promise<string> => {
         const action = args.action?.toLowerCase() || 'add'
-
-        // 使用执行时的上下文，而非注册时的上下文
         const sessionId = context?.sessionId || 'unknown'
         const channelId = context?.channelId || 'unknown'
         const isCronExecution = context?.isCronExecution ?? false
 
-        // 防止 cron 任务执行时递归创建新的 cron 任务
         if (isCronExecution && action === 'add') {
-          return {
-            success: false,
-            error: 'Cannot schedule new cron jobs during cron task execution',
-          }
+          throw new Error('Cannot schedule new cron jobs during cron task execution')
         }
 
         switch (action) {
           case 'add': {
             if (!args.message) {
-              return { success: false, error: 'Message is required for adding a job' }
+              throw new Error('Message is required for adding a job')
             }
-
             if (!args.everySeconds && !args.cronExpr && !args.at) {
-              return {
-                success: false,
-                error: 'Must provide either everySeconds, cronExpr, or at',
-              }
+              throw new Error('Must provide either everySeconds, cronExpr, or at')
             }
 
             const jobType = parseJobType(args.message, args.type)
@@ -105,79 +92,63 @@ export function createCronTools(cronService: CronService, _bus: Bus) {
               timezone: args.tz,
             })
 
-            return {
-              success: true,
-              jobId: job.id,
-              type: job.type,
-              nextExecution: job.nextExecution?.toISOString(),
-              message: `Scheduled ${job.type}: "${truncate(args.message, 50)}"`,
-            }
+            return `Scheduled ${job.type}: "${truncate(args.message, 50)}" (ID: ${job.id}, next: ${job.nextExecution?.toISOString()})`
           }
 
           case 'list': {
             const jobs = await cronService.listJobs()
             if (jobs.length === 0) {
-              return { success: true, message: 'No scheduled jobs' }
+              return 'No scheduled jobs'
             }
-
-            return {
-              success: true,
-              jobs: jobs.map((job) => ({
-                id: job.id,
-                type: job.type,
-                message: truncate(job.message, 50),
-                active: job.active,
-                executionCount: job.executionCount,
-                lastExecution: job.lastExecution?.toISOString(),
-                nextExecution: job.nextExecution?.toISOString(),
-                cronExpr: job.cronExpr,
-                intervalSeconds: job.intervalSeconds,
-                timezone: job.timezone,
-              })),
-            }
+            return jobs
+              .map(
+                (job) =>
+                  `[${job.id}] ${job.type}: "${truncate(job.message, 50)}" | active: ${job.active} | next: ${job.nextExecution?.toISOString() || 'N/A'}`,
+              )
+              .join('\n')
           }
 
           case 'remove': {
             if (!args.jobId) {
-              return { success: false, error: 'jobId is required for removal' }
+              throw new Error('jobId is required for removal')
             }
             const removed = await cronService.removeJob(args.jobId)
-            return removed
-              ? { success: true, message: `Job ${args.jobId} removed` }
-              : { success: false, error: `Job ${args.jobId} not found` }
+            if (!removed) {
+              throw new Error(`Job ${args.jobId} not found`)
+            }
+            return `Job ${args.jobId} removed`
           }
 
           case 'pause': {
             if (!args.jobId) {
-              return { success: false, error: 'jobId is required for pausing' }
+              throw new Error('jobId is required for pausing')
             }
             const paused = await cronService.pauseJob(args.jobId)
-            return paused
-              ? { success: true, message: `Job ${args.jobId} paused` }
-              : { success: false, error: `Job ${args.jobId} not found` }
+            if (!paused) {
+              throw new Error(`Job ${args.jobId} not found`)
+            }
+            return `Job ${args.jobId} paused`
           }
 
           case 'resume': {
             if (!args.jobId) {
-              return { success: false, error: 'jobId is required for resuming' }
+              throw new Error('jobId is required for resuming')
             }
             const resumed = await cronService.resumeJob(args.jobId)
-            return resumed
-              ? { success: true, message: `Job ${args.jobId} resumed` }
-              : { success: false, error: `Job ${args.jobId} not found` }
+            if (!resumed) {
+              throw new Error(`Job ${args.jobId} not found`)
+            }
+            return `Job ${args.jobId} resumed`
           }
 
           default:
-            return { success: false, error: `Unknown action: ${action}` }
+            throw new Error(`Unknown action: ${action}`)
         }
       },
     },
   ]
 }
 
-/**
- * 解析任务类型
- */
 function parseJobType(message: string, type?: string): CronJobType {
   if (type) {
     const t = type.toLowerCase()
@@ -196,14 +167,8 @@ function parseJobType(message: string, type?: string): CronJobType {
   return CronJobType.REMINDER
 }
 
-/**
- * 截断字符串
- */
 function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len) + '...' : str
 }
 
-/**
- * 导出 CronService 类型供外部使用
- */
 export type { CronService }

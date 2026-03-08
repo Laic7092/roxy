@@ -1,23 +1,18 @@
 /**
  * Spawn Tool - 创建后台 SubAgent 任务
- *
- * 允许主 Agent spawn 子任务在后台执行
  */
 
 import type { SubAgentManager } from '../agent/subAgent'
 
 /**
  * 创建 SpawnTool（工厂函数）
- * 工具执行时从上下文中获取 sessionId/channelId
  */
 export function createSpawnTools(manager: SubAgentManager) {
   return [
     {
       name: 'spawn',
       description:
-        'Spawn a subagent to handle a task in the background. ' +
-        'Use this for complex or time-consuming tasks that can run independently. ' +
-        'The subagent will complete the task and report back when done.',
+        'Spawn a subagent to handle a task in the background.',
       parameters: {
         type: 'object',
         properties: {
@@ -27,7 +22,7 @@ export function createSpawnTools(manager: SubAgentManager) {
           },
           label: {
             type: 'string',
-            description: 'Optional short label for the task (for display)',
+            description: 'Optional short label for the task',
           },
         },
         required: ['task'],
@@ -36,20 +31,12 @@ export function createSpawnTools(manager: SubAgentManager) {
         args: { task: string; label?: string },
         _workspace: string,
         context?: { channelId: string; sessionId: string },
-      ) => {
-        try {
-          const { task, label } = args
-          // 从上下文获取 channelId 和 sessionId，作为父 Agent 的上下文
-          const sessionId = context?.sessionId || 'unknown'
-          const channelId = context?.channelId || 'unknown'
-          const result = await manager.spawn(task, label, channelId, sessionId)
-          return { success: true, message: result }
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          }
-        }
+      ): Promise<string> => {
+        const { task, label } = args
+        const sessionId = context?.sessionId || 'unknown'
+        const channelId = context?.channelId || 'unknown'
+        const result = await manager.spawn(task, label, channelId, sessionId)
+        return result
       },
     },
   ]

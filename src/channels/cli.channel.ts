@@ -78,7 +78,7 @@ export class CLIChannel extends BaseChannel {
         this.showToolCall(message.data?.name, message.data?.args)
         break
       case 'tool_result':
-        this.showToolResult(message.data?.name, message.data?.result, message.data?.error)
+        this.showToolResult(message.data?.name, message.data?.result)
         break
       case 'subagent_start':
         this.showSubAgentStart(message.data?.taskId, message.data?.label, message.data?.task)
@@ -223,13 +223,16 @@ export class CLIChannel extends BaseChannel {
     }).start()
   }
 
-  private showToolResult(toolName: string, toolResult: any, error?: string): void {
+  private showToolResult(toolName: string, toolResult: string): void {
     if (this.spinner?.isSpinning) {
       this.spinner.stop()
     }
 
-    if (error) {
-      console.log(chalk.dim(`└─ ❌ ${toolName}: ${error}\n`))
+    // 检查结果是否以 "Error:" 开头来判断是否失败
+    const isError = toolResult?.startsWith('Error:')
+
+    if (isError) {
+      console.log(chalk.dim(`└─ ❌ ${toolName}: ${toolResult}\n`))
     } else {
       console.log(chalk.dim(`└─ ✅ ${toolName}\n`))
     }

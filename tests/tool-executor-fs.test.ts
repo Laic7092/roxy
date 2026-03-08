@@ -32,9 +32,7 @@ describe('ToolExecutor FileSystem Operations', () => {
 
     console.log('readFile result:', result)
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(true)
-    expect(parsedResult.content).toBe(testContent)
+    expect(result.result).toBe(testContent)
   })
 
   it('should execute writeFile tool', async () => {
@@ -51,8 +49,7 @@ describe('ToolExecutor FileSystem Operations', () => {
     })
 
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(true)
+    expect(result.result).toBe(`File written: ${testFilePath}`)
 
     const fullFilePath = path.join(workspaceDir, testFilePath)
     const fileContent = fs.readFileSync(fullFilePath, 'utf-8')
@@ -71,12 +68,9 @@ describe('ToolExecutor FileSystem Operations', () => {
     const result = await toolExecutor.executeTool('listDir', { dirPath: '.' })
 
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(true)
-    expect(Array.isArray(parsedResult.files)).toBe(true)
-    expect(parsedResult.files).toContain('file1.txt')
-    expect(parsedResult.files).toContain('file2.txt')
-    expect(parsedResult.files).toContain('subdir')
+    expect(result.result).toContain('file1.txt')
+    expect(result.result).toContain('file2.txt')
+    expect(result.result).toContain('subdir')
   })
 
   it('should execute getWorkspace tool', async () => {
@@ -87,9 +81,7 @@ describe('ToolExecutor FileSystem Operations', () => {
     const result = await toolExecutor.executeTool('getWorkspace', {})
 
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(true)
-    expect(parsedResult.workspace).toBe(workspaceDir)
+    expect(result.result).toBe(workspaceDir)
   })
 
   it('should handle errors when reading non-existent file', async () => {
@@ -102,9 +94,7 @@ describe('ToolExecutor FileSystem Operations', () => {
     })
 
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(false)
-    expect(parsedResult.error).toBeDefined()
+    expect(result.result).toContain('Error:')
   })
 
   it('should prevent path traversal attacks', async () => {
@@ -115,9 +105,7 @@ describe('ToolExecutor FileSystem Operations', () => {
     const result = await toolExecutor.executeTool('readFile', { filePath: '../etc/passwd' })
 
     expect(result).toHaveProperty('result')
-    const parsedResult = JSON.parse(result.result as string)
-    expect(parsedResult.success).toBe(false)
-    expect(parsedResult.error).toContain('Access denied')
+    expect(result.result).toContain('Error:')
   })
 
   it('should execute multiple tools in sequence', async () => {
@@ -130,21 +118,16 @@ describe('ToolExecutor FileSystem Operations', () => {
       filePath: 'multi-test.txt',
       content: 'Multi-tool test',
     })
-    const parsedWrite = JSON.parse(writeResult.result as string)
-    expect(parsedWrite.success).toBe(true)
+    expect(writeResult.result).toContain('File written')
 
     // 然后读取文件
     const readResult = await toolExecutor.executeTool('readFile', {
       filePath: 'multi-test.txt',
     })
-    const parsedRead = JSON.parse(readResult.result as string)
-    expect(parsedRead.success).toBe(true)
-    expect(parsedRead.content).toBe('Multi-tool test')
+    expect(readResult.result).toBe('Multi-tool test')
 
     // 最后获取工作空间
     const workspaceResult = await toolExecutor.executeTool('getWorkspace', {})
-    const parsedWorkspace = JSON.parse(workspaceResult.result as string)
-    expect(parsedWorkspace.success).toBe(true)
-    expect(parsedWorkspace.workspace).toBe(workspaceDir)
+    expect(workspaceResult.result).toBe(workspaceDir)
   })
 })

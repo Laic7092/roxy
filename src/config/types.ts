@@ -51,6 +51,35 @@ export interface ChannelConfig {
 }
 
 /**
+ * Web 工具配置
+ */
+export interface WebToolsConfig {
+  /** 代理配置 */
+  proxy?: string
+  /** 是否验证 SSL 证书，默认 true */
+  rejectUnauthorized?: boolean
+  /** 搜索工具配置 */
+  search?: {
+    /** Brave Search API Key */
+    apiKey?: string
+    /** 最大结果数，默认 5 */
+    maxResults?: number
+  }
+  /** 抓取工具配置 */
+  fetch?: {
+    /** 最大字符数，默认 50000 */
+    maxChars?: number
+  }
+}
+
+/**
+ * 工具配置
+ */
+export interface ToolsConfig {
+  web?: WebToolsConfig
+}
+
+/**
  * Agent 默认配置
  */
 export interface AgentDefaultsConfig {
@@ -86,6 +115,8 @@ export interface RoxyConfig {
   channels?: {
     [channelId: string]: ChannelConfig
   }
+  /** 工具配置 */
+  tools?: ToolsConfig
 }
 
 /**

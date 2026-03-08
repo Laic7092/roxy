@@ -16,47 +16,33 @@ const getBuiltinSkillsDir = () => {
  * 读取文件内容
  * @param filePath 文件路径（相对于 workspace，或 @skill/{name} 访问技能）
  * @param workspace 工作空间路径
- * @returns 文件内容
+ * @returns 文件内容（字符串）
  */
-export async function readFile(
-  filePath: string,
-  workspace: string,
-): Promise<{ success: boolean; content?: string; error?: string }> {
-  try {
-    // 支持特殊前缀 @skill/{name} 访问技能（自动查找内置和 workspace）
-    if (filePath.startsWith('@skill/')) {
-      const skillName = filePath.replace('@skill/', '')
-      const skillPath = join(workspace, 'skills', skillName, 'SKILL.md')
-      try {
-        const content = await fs.readFile(skillPath, 'utf-8')
-        return { success: true, content }
-      } catch {
-        // workspace 没有则尝试内置技能
-        const builtinDir = getBuiltinSkillsDir()
-        const builtinPath = join(builtinDir, skillName, 'SKILL.md')
-        const content = await fs.readFile(builtinPath, 'utf-8')
-        return { success: true, content }
-      }
+export async function readFile(filePath: string, workspace: string): Promise<string> {
+  // 支持特殊前缀 @skill/{name} 访问技能（自动查找内置和 workspace）
+  if (filePath.startsWith('@skill/')) {
+    const skillName = filePath.replace('@skill/', '')
+    const skillPath = join(workspace, 'skills', skillName, 'SKILL.md')
+    try {
+      return await fs.readFile(skillPath, 'utf-8')
+    } catch {
+      const builtinDir = getBuiltinSkillsDir()
+      const builtinPath = join(builtinDir, skillName, 'SKILL.md')
+      return await fs.readFile(builtinPath, 'utf-8')
     }
-
-    // 验证路径安全性，防止路径遍历攻击
-    const fullPath = resolve(join(workspace, filePath))
-
-    // 检查是否尝试访问敏感系统目录
-    if (isSensitivePath(fullPath)) {
-      throw new Error('Access denied: Attempting to access sensitive system directory')
-    }
-
-    // 检查路径是否在工作空间内
-    if (!fullPath.startsWith(resolve(workspace))) {
-      throw new Error('Access denied: Path traversal detected')
-    }
-
-    const content = await fs.readFile(fullPath, 'utf-8')
-    return { success: true, content }
-  } catch (error) {
-    return { success: false, error: error.message }
   }
+
+  const fullPath = resolve(join(workspace, filePath))
+
+  if (isSensitivePath(fullPath)) {
+    throw new Error('Access denied: Attempting to access sensitive system directory')
+  }
+
+  if (!fullPath.startsWith(resolve(workspace))) {
+    throw new Error('Access denied: Path traversal detected')
+  }
+
+  return await fs.readFile(fullPath, 'utf-8')
 }
 
 /**
@@ -64,73 +50,51 @@ export async function readFile(
  * @param filePath 文件路径（相对于 workspace）
  * @param content 文件内容
  * @param workspace 工作空间路径
- * @returns 操作结果
+ * @returns 成功消息（字符串）
  */
-export async function writeFile(
-  filePath: string,
-  content: string,
-  workspace: string,
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    // 验证路径安全性，防止路径遍历攻击
-    const fullPath = resolve(join(workspace, filePath))
+export async function writeFile(filePath: string, content: string, workspace: string): Promise<string> {
+  const fullPath = resolve(join(workspace, filePath))
 
-    // 检查是否尝试访问敏感系统目录
-    if (isSensitivePath(fullPath)) {
-      throw new Error('Access denied: Attempting to access sensitive system directory')
-    }
-
-    // 检查路径是否在工作空间内
-    if (!fullPath.startsWith(resolve(workspace))) {
-      throw new Error('Access denied: Path traversal detected')
-    }
-
-    // 确保目录存在
-    const dirPath = dirname(fullPath)
-    await fs.mkdir(dirPath, { recursive: true })
-
-    await fs.writeFile(fullPath, content, 'utf-8')
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error.message }
+  if (isSensitivePath(fullPath)) {
+    throw new Error('Access denied: Attempting to access sensitive system directory')
   }
+
+  if (!fullPath.startsWith(resolve(workspace))) {
+    throw new Error('Access denied: Path traversal detected')
+  }
+
+  const dirPath = dirname(fullPath)
+  await fs.mkdir(dirPath, { recursive: true })
+
+  await fs.writeFile(fullPath, content, 'utf-8')
+  return `File written: ${filePath}`
 }
 
 /**
  * 列出目录内容
  * @param dirPath 目录路径（相对于 workspace）
  * @param workspace 工作空间路径
- * @returns 目录内容列表
+ * @returns 文件列表（字符串）
  */
-export async function listDir(
-  dirPath: string = '.',
-  workspace: string,
-): Promise<{ success: boolean; files?: string[]; error?: string }> {
-  try {
-    // 验证路径安全性
-    const fullPath = resolve(join(workspace, dirPath))
+export async function listDir(dirPath: string = '.', workspace: string): Promise<string> {
+  const fullPath = resolve(join(workspace, dirPath))
 
-    // 检查是否尝试访问敏感系统目录
-    if (isSensitivePath(fullPath)) {
-      throw new Error('Access denied: Attempting to access sensitive system directory')
-    }
-
-    // 检查路径是否在工作空间内
-    if (!fullPath.startsWith(resolve(workspace))) {
-      throw new Error('Access denied: Path traversal detected')
-    }
-
-    const files = await fs.readdir(fullPath)
-    return { success: true, files }
-  } catch (error) {
-    return { success: false, error: error.message }
+  if (isSensitivePath(fullPath)) {
+    throw new Error('Access denied: Attempting to access sensitive system directory')
   }
+
+  if (!fullPath.startsWith(resolve(workspace))) {
+    throw new Error('Access denied: Path traversal detected')
+  }
+
+  const files = await fs.readdir(fullPath)
+  return files.join('\n')
 }
 
 /**
  * 获取工作空间路径
  * @param workspace 工作空间路径
- * @returns 工作空间路径
+ * @returns 工作空间路径（字符串）
  */
 export function getWorkspace(workspace: string): string {
   return workspace
@@ -228,8 +192,8 @@ export const fileSystemTools = [
       properties: {},
       required: [],
     },
-    execute: async (_, workspace: string) => {
-      return { success: true, workspace: getWorkspace(workspace) }
+    execute: async (_: unknown, workspace: string) => {
+      return getWorkspace(workspace)
     },
   },
 ]

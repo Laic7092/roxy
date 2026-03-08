@@ -483,9 +483,20 @@ export class RoxyGateway {
   private async registerAllTools(): Promise<void> {
     const { fileSystemTools } = await import('../tools/FileSystemTools')
     const { commandTools } = await import('../tools/CommandTools')
+    const { createWebTools } = await import('../tools/WebTools')
 
     // 基础工具
     this.toolExecutor.registerTools([...fileSystemTools, ...commandTools])
+
+    // Web 工具（从配置加载 API Key）
+    const webToolsConfig = this.config.tools?.web || {}
+    const webTools = createWebTools({
+      apiKey: webToolsConfig.search?.apiKey || process.env.BRAVE_API_KEY,
+      maxResults: webToolsConfig.search?.maxResults || 5,
+      maxChars: webToolsConfig.fetch?.maxChars || 50000,
+      proxy: webToolsConfig.proxy,
+    })
+    this.toolExecutor.registerTools([...webTools])
 
     // SpawnTool 需要 SubAgentManager，等创建后再注册
     log('info', `Registered ${this.toolExecutor.getToolCount()} tool(s)`, 'RoxyGateway')

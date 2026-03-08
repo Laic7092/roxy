@@ -276,8 +276,7 @@ export class ToolExecutor {
           logError(roxyError, 'error', 'ToolExecutor')
 
           return {
-            // 转换为字符串，因为 LLM API 期望 content 是字符串
-            result: JSON.stringify({ success: false, error: roxyError.message }),
+            result: `Error: ${roxyError.message}`,
             tool_call_id: id || `call_${uuidv4()}`,
             name,
           }
@@ -285,7 +284,7 @@ export class ToolExecutor {
       }),
     )
 
-    const successCount = results.filter((r) => !r.result?.success === false).length
+    const successCount = results.filter((r) => !r.result.startsWith('Error: ')).length
     log(
       'debug',
       `Tool execution completed: ${successCount}/${toolCalls.length} successful`,

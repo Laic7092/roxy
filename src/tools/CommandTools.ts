@@ -1,6 +1,5 @@
 import { exec } from 'child_process'
 import { resolve } from 'path'
-import { access, appendFile, constants } from 'fs/promises'
 
 // 命令黑名单（防止危险命令）
 const COMMAND_BLACKLIST = [
@@ -40,35 +39,11 @@ const COMMAND_BLACKLIST = [
   'umount',
 ]
 
-// 日志配置
-const LOG_FILE_PATH = './command_logs.txt'
-
-/**
- * 记录命令执行日志
- */
-async function logCommandExecution(
-  command: string,
-  workspace: string,
-  success: boolean,
-  error?: string,
-): Promise<void> {
-  const timestamp = new Date().toISOString()
-  const logEntry = `[${timestamp}] Command: "${command}" | Workspace: "${workspace}" | Success: ${success}${error ? ` | Error: ${error}` : ''}\n`
-
-  try {
-    await appendFile(LOG_FILE_PATH, logEntry, { encoding: 'utf8' })
-  } catch (logError) {
-    // 日志写入失败时不抛出错误，避免影响主流程
-    // eslint-disable-next-line no-console
-    console.error('Failed to write command log:', logError)
-  }
-}
-
 /**
  * 检查命令是否在黑名单中
  */
 function isBlacklistedCommand(command: string): boolean {
-  const cmdName = command.trim().split(' ')[0].split('/').pop() || '' // 提取命令名称，处理路径
+  const cmdName = command.trim().split(' ')[0].split('/').pop() || ''
   return COMMAND_BLACKLIST.includes(cmdName)
 }
 
@@ -104,150 +79,95 @@ function isSensitivePath(path: string): boolean {
 }
 
 /**
- * 执行命令（支持管道、重定向等shell特性）
+ * 执行命令（支持管道、重定向等 shell 特性）
  * @param command 要执行的完整命令字符串
  * @param workspace 工作空间路径
- * @param options 选项，如超时时间等
- * @returns 执行结果
+ * @param options 选项
+ * @returns 执行结果（字符串）
  */
 export async function executeCommand(
   command: string,
   workspace: string,
   options: {
-    timeout?: number // 超时时间（毫秒）
-    maxBuffer?: number // 最大缓冲区大小（字节）
-    env?: Record<string, string> // 额外的环境变量
-    shell?: string // 使用的shell，默认 /bin/sh
-    allowBlacklisted?: boolean // 是否允许黑名单命令（谨慎使用）
+    timeout?: number
+    maxBuffer?: number
+    env?: Record<string, string>
+    shell?: string
+    allowBlacklisted?: boolean
   } = {},
-): Promise<{
-  success: boolean
-  stdout?: string
-  stderr?: string
-  code?: number
-  error?: string
-  signal?: string
-}> {
-  try {
-    // 1. 验证工作空间路径
-    const resolvedWorkspace = resolve(workspace)
+): Promise<string> {
+  const resolvedWorkspace = resolve(workspace)
 
-    // 2. 检查敏感目录
-    if (isSensitivePath(resolvedWorkspace)) {
-      const errorMsg = `Access denied: Cannot execute commands in sensitive system directory: ${resolvedWorkspace}`
-      await logCommandExecution(command, workspace, false, errorMsg)
-      return { success: false, error: errorMsg, code: 403 }
-    }
-
-    // 3. 检查工作空间是否存在
-    try {
-      await access(resolvedWorkspace, constants.F_OK)
-    } catch {
-      const errorMsg = `Workspace does not exist: ${resolvedWorkspace}`
-      await logCommandExecution(command, workspace, false, errorMsg)
-      return { success: false, error: errorMsg, code: 404 }
-    }
-
-    // 4. 黑名单检查（除非显式允许）
-    if (!options.allowBlacklisted && isBlacklistedCommand(command)) {
-      const errorMsg = `Command contains blacklisted command: ${command.split(' ')[0]}`
-      await logCommandExecution(command, workspace, false, errorMsg)
-      return { success: false, error: errorMsg, code: 403 }
-    }
-
-    // 5. 设置默认值
-    const timeout = options.timeout || 30000 // 默认30秒
-    const maxBuffer = options.maxBuffer || 10 * 1024 * 1024 // 默认10MB
-    const shell = options.shell || '/bin/sh'
-
-    // 6. 执行命令
-    const { stdout, stderr, code, signal } = await new Promise<{
-      stdout: string
-      stderr: string
-      code: number | null
-      signal: NodeJS.Signals | null
-    }>((resolve, reject) => {
-      const childProcess = exec(
-        command,
-        {
-          cwd: resolvedWorkspace,
-          env: {
-            ...process.env,
-            PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-            ...options.env,
-          },
-          shell,
-          timeout,
-          maxBuffer,
-          windowsHide: true, // Windows下隐藏子进程窗口
-        },
-        (error, stdout, stderr) => {
-          if (error) {
-            // 将错误信息与stderr合并
-            reject({
-              error,
-              stdout,
-              stderr: stderr || error.message,
-              code:
-                typeof error.code === 'number'
-                  ? error.code
-                  : error.code
-                    ? parseInt(error.code as string)
-                    : null,
-              signal: error.signal as NodeJS.Signals | null,
-            })
-          } else {
-            resolve({ stdout, stderr, code: 0, signal: null })
-          }
-        },
-      )
-
-      // 额外的超时保护
-      const timeoutId = setTimeout(() => {
-        if (childProcess.exitCode === null && !childProcess.killed) {
-          childProcess.kill('SIGTERM')
-          // 1秒后如果还没退出，强制杀死
-          setTimeout(() => {
-            if (childProcess.exitCode === null && !childProcess.killed) {
-              childProcess.kill('SIGKILL')
-            }
-          }, 1000)
-        }
-      }, timeout)
-
-      // 清理超时定时器
-      childProcess.on('exit', () => {
-        clearTimeout(timeoutId)
-      })
-    })
-
-    // 7. 记录成功日志
-    await logCommandExecution(command, workspace, true)
-
-    return {
-      success: code === 0,
-      stdout,
-      stderr,
-      code: code || undefined,
-      signal: signal || undefined,
-    }
-  } catch (error: any) {
-    // 8. 处理错误
-    const errorMessage = error.message || String(error)
-    const errorCode = error.code
-    const errorSignal = error.signal
-
-    await logCommandExecution(command, workspace, false, errorMessage)
-
-    return {
-      success: false,
-      stdout: error.stdout,
-      stderr: error.stderr || errorMessage,
-      error: errorMessage,
-      code: errorCode,
-      signal: errorSignal,
-    }
+  if (isSensitivePath(resolvedWorkspace)) {
+    throw new Error(`Access denied: Cannot execute commands in sensitive system directory: ${resolvedWorkspace}`)
   }
+
+  if (!options.allowBlacklisted && isBlacklistedCommand(command)) {
+    throw new Error(`Command contains blacklisted command: ${command.split(' ')[0]}`)
+  }
+
+  const timeout = options.timeout || 30000
+  const maxBuffer = options.maxBuffer || 10 * 1024 * 1024
+  const shell = options.shell || '/bin/sh'
+
+  const { stdout, stderr, code, signal } = await new Promise<{
+    stdout: string
+    stderr: string
+    code: number | null
+    signal: NodeJS.Signals | null
+  }>((resolve, reject) => {
+    const childProcess = exec(
+      command,
+      {
+        cwd: resolvedWorkspace,
+        env: {
+          ...process.env,
+          PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+          ...options.env,
+        },
+        shell,
+        timeout,
+        maxBuffer,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject({
+            error,
+            stdout,
+            stderr: stderr || error.message,
+            code:
+              typeof error.code === 'number'
+                ? error.code
+                : error.code
+                  ? parseInt(error.code as string)
+                  : null,
+            signal: error.signal as NodeJS.Signals | null,
+          })
+        } else {
+          resolve({ stdout, stderr, code: 0, signal: null })
+        }
+      },
+    )
+
+    const timeoutId = setTimeout(() => {
+      if (childProcess.exitCode === null && !childProcess.killed) {
+        childProcess.kill('SIGTERM')
+        setTimeout(() => {
+          if (childProcess.exitCode === null && !childProcess.killed) {
+            childProcess.kill('SIGKILL')
+          }
+        }, 1000)
+      }
+    }, timeout)
+
+    childProcess.on('exit', () => {
+      clearTimeout(timeoutId)
+    })
+  })
+
+  const output = [stdout, stderr].filter(Boolean).join('\n')
+  return output || `Command completed with code ${code}`
 }
 
 // 导出工具定义
@@ -277,13 +197,13 @@ export const commandTools = [
               type: 'number',
               description: 'Timeout in milliseconds (default: 30000, 0 for no timeout)',
               minimum: 0,
-              maximum: 600000, // 10分钟最大
+              maximum: 600000,
             },
             maxBuffer: {
               type: 'number',
               description: 'Max output buffer size in bytes (default: 10485760, 10MB)',
               minimum: 1024,
-              maximum: 104857600, // 100MB最大
+              maximum: 104857600,
             },
             env: {
               type: 'object',
