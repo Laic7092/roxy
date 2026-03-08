@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { constants } from 'node:fs'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
+import type { RoxyConfig } from './types'
+import { defaultConfig } from './types'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
@@ -13,27 +15,6 @@ export const SESSIONS_PATH = join(ROOT_PATH, 'sessions')
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 export const TEMPLATE_PATH = join(__dirname, '../../src/template')
-
-const defaultConfig = {
-  workspace: WROKSPACE_PATH,
-  agents: {
-    defaults: {
-      model: 'ollama/qwen3.5:9b',
-    },
-  },
-  providers: {
-    deepseek: {
-      apiKey: '',
-      baseURL: 'https://api.deepseek.com',
-    },
-    ollama: {
-      apiKey: 'ollama-local',
-      baseURL: 'http://localhost:11434/v1',
-    },
-  },
-}
-
-type Config = typeof defaultConfig
 
 /**
  * 统一初始化所有配置和工作区文件
@@ -191,10 +172,13 @@ export async function syncWorkspaceTemplates(): Promise<void> {
   log('info', 'Workspace templates synchronized', 'config/manager')
 }
 
-export async function loadConfig(): Promise<Config> {
+export async function loadConfig(): Promise<RoxyConfig> {
   try {
     const data = await readFile(CONFIG_PATH, 'utf-8')
-    return JSON.parse(data)
+    const loadedConfig = JSON.parse(data)
+
+    // 合并默认配置，确保所有字段都存在
+    return mergeConfig(defaultConfig, loadedConfig)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       log('warn', `配置文件不存在：${CONFIG_PATH}，正在初始化...`, 'config/manager')
@@ -215,4 +199,57 @@ export async function loadConfig(): Promise<Config> {
       throw error
     }
   }
+}
+
+/**
+ * 合并配置，确保默认值生效
+ */
+function mergeConfig(defaults: RoxyConfig, loaded: RoxyConfig): RoxyConfig {
+  const config: RoxyConfig = {
+    ...defaults,
+    ...loaded,
+    agents: {
+      defaults: {
+        ...defaults.agents.defaults,
+        ...loaded.agents?.defaults,
+      },
+      list: loaded.agents?.list,
+    },
+    providers: {
+      ...defaults.providers,
+      ...loaded.providers,
+    },
+    heartbeat: {
+      ...defaults.heartbeat,
+      ...loaded.heartbeat,
+    },
+    cron: {
+      ...defaults.cron,
+      ...loaded.cron,
+    },
+    channels: {
+      ...defaults.channels,
+      ...loaded.channels,
+    },
+  }
+
+  return config
+}
+
+/**
+ * 保存配置
+ */
+export async function saveConfig(config: RoxyConfig): Promise<void> {
+  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2))
+  log('success', 'Config saved', 'config/manager')
+}
+
+/**
+ * 更新部分配置
+ */
+export async function updateConfig(partial: Partial<RoxyConfig>): Promise<RoxyConfig> {
+  const current = await loadConfig()
+  const updated = mergeConfig(current, partial)
+  await saveConfig(updated)
+  return updated
 }

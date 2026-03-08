@@ -195,15 +195,23 @@ roxy/
 
 ### 配置管理
 
-配置文件位于 `~/.roxy/config.json`：
+配置文件位于 `~/.roxy/config.json`，统一管理所有配置：
 
 ```json
 {
   "workspace": "~/.roxy/workspace",
+  "sessionDir": "~/.roxy/sessions",
   "agents": {
     "defaults": {
       "model": "ollama/qwen3.5:9b"
-    }
+    },
+    "list": [
+      {
+        "id": "main-agent",
+        "role": "main",
+        "model": "ollama/qwen3.5:9b"
+      }
+    ]
   },
   "providers": {
     "deepseek": {
@@ -214,9 +222,36 @@ roxy/
       "apiKey": "ollama-local",
       "baseURL": "http://localhost:11434/v1"
     }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": 1800
+  },
+  "cron": {
+    "enabled": true
+  },
+  "channels": {
+    "cli": {
+      "id": "cli",
+      "enabled": true
+    }
   }
 }
 ```
+
+**配置说明**：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `workspace` | 工作区路径 | `~/.roxy/workspace` |
+| `sessionDir` | 会话存储路径 | `~/.roxy/sessions` |
+| `agents.defaults.model` | 默认模型 | `ollama/qwen3.5:9b` |
+| `agents.list` | 自定义 Agent 列表 | - |
+| `providers` | LLM Provider 配置 | - |
+| `heartbeat.enabled` | 是否启用心跳 | `true` |
+| `heartbeat.interval` | 心跳间隔（秒） | `1800` (30 分钟) |
+| `cron.enabled` | 是否启用 Cron | `true` |
+| `channels` | Channel 配置 | - |
 
 ### 工作区文件
 

@@ -53,7 +53,7 @@ export class RoxyGateway {
   constructor(deps: GatewayDeps) {
     this.config = deps.config
     this.bus = getBus()
-    this.sessionManager = new SessionManager(deps.config.sessionDir || '')
+    this.sessionManager = new SessionManager(deps.config.sessionDir)
     this.toolExecutor = new ToolExecutor(deps.config.workspace)
     this.channelManager = new ChannelManager(this.bus)
     this.setupEventSubscriptions()

@@ -4,15 +4,6 @@ import type { IChannel, ChannelMessage } from './types'
 import type { Bus } from '../bus/instance'
 
 /**
- * Channel 配置
- */
-export interface ChannelConfig {
-  id: string
-  enabled?: boolean
-  [key: string]: any
-}
-
-/**
  * Channel 工厂函数
  */
 export type ChannelFactory = () => IChannel | Promise<IChannel>

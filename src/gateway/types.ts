@@ -1,26 +1,15 @@
-import type { AgentConfig } from '../agent/types'
-import type { ChannelConfig } from '../channels/manager'
+/**
+ * Gateway 类型定义
+ *
+ * Gateway 作为统一入口，使用 config/manager 中的 RoxyConfig
+ */
+
+import type { RoxyConfig } from '../config/types'
 
 /**
- * Gateway 配置
+ * Gateway 配置（即 RoxyConfig）
  */
-export interface GatewayConfig {
-  workspace: string
-  sessionDir?: string
-  agents?: AgentConfig[]
-  defaultModel?: string
-  /** 心跳服务配置 */
-  heartbeat?: {
-    /** 是否启用心跳，默认 true */
-    enabled?: boolean
-    /** 心跳间隔（秒），默认 1800s (30 分钟) */
-    interval?: number
-  }
-  /** 渠道配置 */
-  channels?: {
-    [channelId: string]: ChannelConfig
-  }
-}
+export type GatewayConfig = RoxyConfig
 
 /**
  * Gateway 依赖注入容器
