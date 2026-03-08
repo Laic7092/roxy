@@ -70,9 +70,12 @@ function htmlToMarkdown(html: string): string {
   let text = html
 
   // 转换链接
-  text = text.replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, content) => {
-    return `[${stripTags(content)}](${href})`
-  })
+  text = text.replace(
+    /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_, href, content) => {
+      return `[${stripTags(content)}](${href})`
+    },
+  )
 
   // 转换标题
   text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, content) => {
@@ -96,7 +99,7 @@ export interface WebToolsConfig {
   maxResults?: number
   maxChars?: number
   proxy?: string
-  rejectUnauthorized?: boolean  // 是否验证 SSL 证书
+  rejectUnauthorized?: boolean // 是否验证 SSL 证书
 }
 
 /**
@@ -107,7 +110,7 @@ export function createWebTools(config: WebToolsConfig = {}) {
   const maxResults = config.maxResults || 5
   const maxChars = config.maxChars || 50000
   const proxy = config.proxy
-  const rejectUnauthorized = config.rejectUnauthorized ?? true  // 默认验证证书
+  const rejectUnauthorized = config.rejectUnauthorized ?? true // 默认验证证书
 
   return [
     {
@@ -263,7 +266,11 @@ export function createWebTools(config: WebToolsConfig = {}) {
             extractor = 'json'
           }
           // HTML 响应
-          else if (contentType.includes('text/html') || body.slice(0, 256).toLowerCase().startsWith('<!doctype') || body.slice(0, 256).toLowerCase().startsWith('<html')) {
+          else if (
+            contentType.includes('text/html') ||
+            body.slice(0, 256).toLowerCase().startsWith('<!doctype') ||
+            body.slice(0, 256).toLowerCase().startsWith('<html')
+          ) {
             const htmlContent = body
             // 简化版 Readability：提取主要内容
             const content = extractMainContent(htmlContent)

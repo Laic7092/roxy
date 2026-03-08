@@ -31,7 +31,7 @@ interface LogConfig {
 }
 
 const globalLogConfig: LogConfig = {
-  minLevel: 'info', // 默认显示 info 及以上级别
+  minLevel: 'error', // 默认显示 info 及以上级别
   enabledContexts: null,
 }
 

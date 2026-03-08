@@ -41,9 +41,14 @@ describe('WebTools', () => {
   it('should fetch JSON content for web_fetch', async () => {
     // 测试有效的 JSON URL（使用 httpbin 或类似服务）
     // 注意：这个测试需要网络连接
-    const result = await toolExecutor.executeTool('web_fetch', {
-      url: 'https://httpbin.org/json',
-    }, undefined, { channelId: 'test', sessionId: 'test' })
+    const result = await toolExecutor.executeTool(
+      'web_fetch',
+      {
+        url: 'https://httpbin.org/json',
+      },
+      undefined,
+      { channelId: 'test', sessionId: 'test' },
+    )
 
     expect(result).toHaveProperty('result')
     // 可能返回 JSON 内容或错误（网络问题）

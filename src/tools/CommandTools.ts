@@ -99,7 +99,9 @@ export async function executeCommand(
   const resolvedWorkspace = resolve(workspace)
 
   if (isSensitivePath(resolvedWorkspace)) {
-    throw new Error(`Access denied: Cannot execute commands in sensitive system directory: ${resolvedWorkspace}`)
+    throw new Error(
+      `Access denied: Cannot execute commands in sensitive system directory: ${resolvedWorkspace}`,
+    )
   }
 
   if (!options.allowBlacklisted && isBlacklistedCommand(command)) {

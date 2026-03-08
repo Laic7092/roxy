@@ -213,8 +213,9 @@ export class CLIChannel extends BaseChannel {
       process.stdout.write('\n')
     }
 
-    const argsPreview = toolArgs ? `(${JSON.stringify(toolArgs).slice(0, 50)})` : ''
-    console.log(chalk.dim(`└─ ⚙️  ${toolName} ${chalk.gray(argsPreview)}`))
+    // const argsPreview = toolArgs ? `(${JSON.stringify(toolArgs).slice(0, 50)})` : ''
+    // console.log(chalk.dim(`└─ ⚙️  ${toolName} ${chalk.gray(argsPreview)}`))
+    console.log(chalk.dim(`└─ ⚙️  ${toolName}`))
 
     this.spinner = ora({
       text: chalk.dim('executing...'),
@@ -234,7 +235,7 @@ export class CLIChannel extends BaseChannel {
     if (isError) {
       console.log(chalk.dim(`└─ ❌ ${toolName}: ${toolResult}\n`))
     } else {
-      console.log(chalk.dim(`└─ ✅ ${toolName}\n`))
+      // console.log(chalk.dim(`└─ ✅ ${toolName}\n`))
     }
 
     this.spinner = null
@@ -249,8 +250,8 @@ export class CLIChannel extends BaseChannel {
       process.stdout.write('\n')
     }
 
-    console.log(chalk.dim(`└─ 🤖 SubAgent [${label}] started (id: ${taskId})`))
-    console.log(chalk.dim(`   Task: ${task.length > 60 ? task.slice(0, 60) + '...' : task}\n`))
+    console.log(chalk.blue(`└─ 🤖 SubAgent [${label}] started (id: ${taskId})`))
+    console.log(chalk.blue(`   Task: ${task.length > 60 ? task.slice(0, 60) + '...' : task}\n`))
 
     this.spinner = ora({
       text: chalk.dim('subagent working...'),
@@ -270,10 +271,12 @@ export class CLIChannel extends BaseChannel {
       this.spinner.stop()
     }
 
+    process.stdout.write('\n')
+
     const status = success ? '✅' : '❌'
     const statusText = success ? 'completed' : 'failed'
 
-    console.log(chalk.dim(`└─ ${status} SubAgent [${label}] ${statusText}`))
+    console.log(chalk.blue(`└─ ${status} SubAgent [${label}] ${statusText}`))
 
     if (result) {
       const preview = result.length > 200 ? result.slice(0, 200) + '...' : result

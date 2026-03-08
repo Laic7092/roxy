@@ -11,8 +11,7 @@ export function createSpawnTools(manager: SubAgentManager) {
   return [
     {
       name: 'spawn',
-      description:
-        'Spawn a subagent to handle a task in the background.',
+      description: 'Spawn a subagent to handle a task in the background.',
       parameters: {
         type: 'object',
         properties: {

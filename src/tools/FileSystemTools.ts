@@ -52,7 +52,11 @@ export async function readFile(filePath: string, workspace: string): Promise<str
  * @param workspace 工作空间路径
  * @returns 成功消息（字符串）
  */
-export async function writeFile(filePath: string, content: string, workspace: string): Promise<string> {
+export async function writeFile(
+  filePath: string,
+  content: string,
+  workspace: string,
+): Promise<string> {
   const fullPath = resolve(join(workspace, filePath))
 
   if (isSensitivePath(fullPath)) {
