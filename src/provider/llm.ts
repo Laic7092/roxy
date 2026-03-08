@@ -53,7 +53,7 @@ export class LiteLLMProvider extends LLMProvider {
           if (errorBody) {
             errorMessage += `\nResponse body: ${errorBody}`
           }
-        } catch (e) {
+        } catch {
           log('warn', 'Could not read error response body', 'LiteLLMProvider')
         }
 

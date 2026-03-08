@@ -195,8 +195,13 @@ export class CronService {
               job.nextExecution =
                 typeof nextDates[0].toDate === 'function' ? nextDates[0].toDate() : nextDates[0]
             }
-          } catch (_e) {
-            // Ignore if nextDates is not available
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            log(
+              'warn',
+              `Failed to get next execution time for job ${job.id}: ${msg}`,
+              'CronService',
+            )
           }
         }
 
@@ -338,9 +343,13 @@ export class CronService {
               job.nextExecution =
                 typeof nextDates[0].toDate === 'function' ? nextDates[0].toDate() : nextDates[0]
             }
-          } catch (_e) {
-            // Ignore if nextDates is not available
-            // eslint-disable-next-line no-unused-vars
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            log(
+              'warn',
+              `Failed to get next execution time for job ${job.id}: ${msg}`,
+              'CronService',
+            )
           }
         }
 
@@ -513,8 +522,9 @@ export class CronService {
             job.nextExecution = nextDates[0]
           }
         }
-      } catch (_e) {
-        // Ignore if nextDates is not available
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        log('warn', `Failed to get next execution time for job ${jobId}: ${msg}`, 'CronService')
       }
 
       this.saveJobs()

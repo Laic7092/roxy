@@ -74,7 +74,7 @@ export class ContextMng {
       paths.map(async (path) => {
         try {
           return await readFile(path, 'utf-8')
-        } catch (error) {
+        } catch {
           log('warn', `Could not read ${path}, skipping...`, 'context')
           return ''
         }

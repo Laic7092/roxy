@@ -163,10 +163,7 @@ export class SubAgentManager {
   /**
    * 执行 SubAgent 任务
    */
-  private async runSubAgent(
-    task: SubAgentTask,
-    signal: AbortSignal,
-  ): Promise<void> {
+  private async runSubAgent(task: SubAgentTask, signal: AbortSignal): Promise<void> {
     log('debug', `Subagent [${task.id}] starting task: ${task.label}`, 'SubAgentManager')
 
     try {

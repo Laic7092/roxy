@@ -53,10 +53,9 @@ export class Session {
 
       this.messages.push(message)
     } else {
-      content || (content = '')
       const message: Message = {
         role,
-        content,
+        content: content || '',
         timestamp: new Date().toISOString(),
       }
 

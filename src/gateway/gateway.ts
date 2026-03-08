@@ -443,7 +443,9 @@ export class RoxyGateway {
     if (this.channelManager) {
       const enabledChannels = this.channelManager.enabledChannels
       if (enabledChannels.length > 0) {
-        console.log(chalk.green('✓') + ` Channels enabled: ${chalk.cyan(enabledChannels.join(', '))}`)
+        console.log(
+          chalk.green('✓') + ` Channels enabled: ${chalk.cyan(enabledChannels.join(', '))}`,
+        )
       } else {
         console.log(chalk.yellow('⚠ Warning: No channels enabled'))
       }

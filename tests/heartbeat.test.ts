@@ -8,7 +8,7 @@ import { tmpdir } from 'os'
 class MockProvider {
   chatResult: any = { choices: [{ message: { tool_calls: [] } }] }
 
-  async chat(params: any) {
+  async chat() {
     return this.chatResult
   }
 }

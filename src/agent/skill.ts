@@ -67,7 +67,7 @@ export class SkillsLoader {
 
         // 异步处理文件变化事件
         ;(async () => {
-          for await (const { eventType, filename } of watcher) {
+          for await (const { filename } of watcher) {
             // 只监听 SKILL.md 文件的变化
             if (filename && filename.endsWith('SKILL.md')) {
               log('info', `Skill file changed: ${filename}`, 'skill')
@@ -141,7 +141,7 @@ export class SkillsLoader {
             try {
               await access(skillPath)
               const content = await readFile(skillPath, 'utf-8')
-              const { name, description } = this.parseFrontmatter(content)
+              const { description } = this.parseFrontmatter(content)
               // 内置技能覆盖同名 workspace 技能
               skills.set(entry.name, { name: entry.name, description, source })
             } catch {}

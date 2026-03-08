@@ -126,12 +126,12 @@ describe('CronService', () => {
   })
 
   it('should persist jobs to storage', async () => {
-    const job1 = await cronService.addJob('Persistent job 1', 'session-1', 'channel-1', {
+    await cronService.addJob('Persistent job 1', 'session-1', 'channel-1', {
       intervalSeconds: 300,
       type: CronJobType.REMINDER,
     })
 
-    const job2 = await cronService.addJob('Persistent job 2', 'session-2', 'channel-2', {
+    await cronService.addJob('Persistent job 2', 'session-2', 'channel-2', {
       cronExpr: '0 8 * * *',
       type: CronJobType.TASK,
     })
@@ -149,8 +149,6 @@ describe('CronService', () => {
 
   it('should restore jobs from storage on initialization', async () => {
     // Create first service and add jobs
-    const storagePath = path.join(testWorkspace, 'cron-jobs.json')
-
     const job = await cronService.addJob('Restore test job', 'session-1', 'channel-1', {
       intervalSeconds: 600,
       type: CronJobType.REMINDER,

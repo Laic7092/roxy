@@ -127,7 +127,7 @@ export class AgentLoop {
           tool_choice: 'auto',
         })
 
-        const { tool_calls: toolCalls, content } = result?.choices?.[0]?.message
+        const { tool_calls: toolCalls, content } = result.choices?.[0]?.message ?? {}
 
         this.session.addMessage('assistant', content || '', toolCalls)
         await this.sessionManager.save(ctx.sessionId)
