@@ -156,26 +156,13 @@ export class CLIChannel extends BaseChannel {
   private async handleCommand(cmd: string): Promise<void> {
     switch (cmd) {
       case '/exit':
-      case '/quit':
+      case '/q':
         console.log(chalk.blue('\n👋 Goodbye!\n'))
         process.exit(0)
         break
-      case '/clear':
-        console.log(chalk.yellow('🗑️  Session cleared (note: session data still persisted)'))
-        break
-      case '/history':
-        console.log(chalk.gray('\n📜 History command not available in this mode'))
-        break
-      case '/skills':
-        console.log(chalk.gray('🔄 Reloading skills...'))
-        break
       case '/help':
         console.log(chalk.gray('\n📚 Commands:'))
-        console.log(chalk.gray('  /help     - Show help'))
-        console.log(chalk.gray('  /clear    - Clear session'))
-        console.log(chalk.gray('  /history  - Show history'))
-        console.log(chalk.gray('  /skills   - Reload skills'))
-        console.log(chalk.gray('  /exit     - Exit\n'))
+        console.log(chalk.gray('  /q,/exit     - Exit'))
         break
       default:
         console.log(chalk.red(`❌ Unknown command: ${cmd}`))
