@@ -95,9 +95,6 @@ pnpm dev
 
 # 构建项目
 pnpm build
-
-# 运行 Web 服务器
-pnpm web
 ```
 
 ### 测试

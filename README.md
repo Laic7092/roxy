@@ -35,9 +35,6 @@ pnpm build
 # 初始化配置
 pnpm build
 node dist/cli/index.mjs
-
-# 运行 Web 服务器
-pnpm web
 ```
 
 ### 作为库使用
@@ -79,7 +76,6 @@ pnpm build        # 构建项目
 pnpm test         # 运行测试
 pnpm lint         # 代码检查
 pnpm fmt          # 格式化代码
-pnpm web          # 运行 Web 服务器
 ```
 
 ## 📖 文档

@@ -22,8 +22,7 @@
     "dev": "node --loader ts-node/esm",
     "test": "vitest run",
     "test:ui": "vitest --ui",
-    "test:watch": "vitest",
-    "web": "node dist/web/server.mjs"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "chalk": "^5.6.2",
