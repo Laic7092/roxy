@@ -62,7 +62,7 @@ export class ContextMng {
     this.currentSkills = skillMetas
     _sys_msg.push({
       role: 'system',
-      content: `# Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\nTo load a skill's full instructions:\n- Built-in skill: readFile(filePath="@skills/{skillName}/SKILL.md")\n- Workspace skill: readFile(filePath="@workspace/skills/{skillName}/SKILL.md")`,
+      content: `# Skill\n\nSkills are your specialized capabilities. Each skill contains detailed instructions for specific tasks.\n\n ## Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\n## Guidelines\n- Load skill: readFile("@skill/{skillName}")`,
     })
 
     return _sys_msg

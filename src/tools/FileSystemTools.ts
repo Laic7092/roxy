@@ -14,7 +14,7 @@ const getBuiltinSkillsDir = () => {
 
 /**
  * 读取文件内容
- * @param filePath 文件路径（相对于 workspace，或 @skills/{name}/SKILL.md 访问内置技能）
+ * @param filePath 文件路径（相对于 workspace，或 @skill/{name} 访问技能）
  * @param workspace 工作空间路径
  * @returns 文件内容
  */
@@ -23,21 +23,20 @@ export async function readFile(
   workspace: string,
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   try {
-    // 支持特殊前缀 @skills/{name}/SKILL.md 访问内置技能
-    if (filePath.startsWith('@skills/')) {
-      const skillName = filePath.replace('@skills/', '').replace('/SKILL.md', '')
-      const builtinDir = getBuiltinSkillsDir()
-      const skillPath = join(builtinDir, skillName, 'SKILL.md')
-      const content = await fs.readFile(skillPath, 'utf-8')
-      return { success: true, content }
-    }
-
-    // 支持特殊前缀 @workspace/skills/{name}/SKILL.md 访问 workspace 技能
-    if (filePath.startsWith('@workspace/skills/')) {
-      const skillName = filePath.replace('@workspace/skills/', '').replace('/SKILL.md', '')
+    // 支持特殊前缀 @skill/{name} 访问技能（自动查找内置和 workspace）
+    if (filePath.startsWith('@skill/')) {
+      const skillName = filePath.replace('@skill/', '')
       const skillPath = join(workspace, 'skills', skillName, 'SKILL.md')
-      const content = await fs.readFile(skillPath, 'utf-8')
-      return { success: true, content }
+      try {
+        const content = await fs.readFile(skillPath, 'utf-8')
+        return { success: true, content }
+      } catch {
+        // workspace 没有则尝试内置技能
+        const builtinDir = getBuiltinSkillsDir()
+        const builtinPath = join(builtinDir, skillName, 'SKILL.md')
+        const content = await fs.readFile(builtinPath, 'utf-8')
+        return { success: true, content }
+      }
     }
 
     // 验证路径安全性，防止路径遍历攻击
@@ -167,13 +166,13 @@ function isSensitivePath(path: string): boolean {
 export const fileSystemTools = [
   {
     name: 'readFile',
-    description: 'Read content from a file. Use @skills/{name}/SKILL.md to load built-in skills.',
+    description: 'Read content from a file. Use @skill/{name} to load a skill.',
     parameters: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
-          description: 'Path to the file (relative to workspace, or @skills/{name}/SKILL.md)',
+          description: 'Path to the file (relative to workspace, or @skill/{name})',
         },
       },
       required: ['filePath'],
