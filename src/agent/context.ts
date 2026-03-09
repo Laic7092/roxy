@@ -5,6 +5,8 @@ import { join } from 'path'
 import type { Message, ToolMessage } from '../session/manager'
 import { log } from '../utils/error-handler'
 
+const DIVIDE_LINE = '\n\n---\n\n'
+
 export class ContextMng {
   private sysMsgPromise: Promise<Message[]>
   private skillsLoader: SkillsLoader
@@ -46,26 +48,17 @@ export class ContextMng {
 
     const agentPrompt = await this.loadAgentPrompt(this.workspace)
 
-    const _sys_msg: Message[] = [
-      {
-        role: 'system',
-        content: agentPrompt,
-      },
-      {
-        role: 'system',
-        content: memoryContent,
-      },
-    ]
-
     // 使用缓存加载技能元数据
     const skillMetas = await this.skillsLoader.getSkillMetadata(true)
     this.currentSkills = skillMetas
-    _sys_msg.push({
-      role: 'system',
-      content: `# Skill\n\nSkills are your specialized capabilities. Each skill contains detailed instructions for specific tasks.\n\n ## Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\n## Guidelines\n- Load skill: readFile("@skill/{skillName}")`,
-    })
+    const skillContent = `# Skill\n\nSkills are your specialized capabilities. Each skill contains detailed instructions for specific tasks.\n\n ## Available Skills\n\n${skillMetas.map((s) => `- **${s.name}**: ${s.description}`).join('\n')}\n\n## Guidelines\n- Load skill: readFile("@skill/{skillName}")`
 
-    return _sys_msg
+    return [
+      {
+        role: 'system',
+        content: [agentPrompt, memoryContent, skillContent].join(DIVIDE_LINE),
+      },
+    ]
   }
 
   async loadAgentPrompt(workspace: string): Promise<string> {

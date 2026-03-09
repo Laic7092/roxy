@@ -73,7 +73,7 @@ export class AgentLoop {
       // 这会触发主 Agent 重新处理并生成用户友好的响应
       if (this.session && event.parentSessionId === this.session.id) {
         // 添加 SubAgent 完成通知到会话
-        this.session.addMessage('system', event.result)
+        this.session.addMessage('assistant', event.result)
         await this.sessionManager.save(this.session.id)
 
         // 重新触发 Agent 执行，处理 SubAgent 的结果
