@@ -1,20 +1,20 @@
 import { writeFile, mkdir, readFile, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { constants } from 'node:fs'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
 import type { RoxyConfig } from './types'
 import { defaultConfig } from './types'
+import { getProjectRoot } from '../utils/helper'
 
 export const ROOT_PATH = join(homedir(), '.roxy')
 export const WROKSPACE_PATH = join(ROOT_PATH, 'workspace')
 export const CONFIG_PATH = join(ROOT_PATH, 'config.json')
 export const SESSIONS_PATH = join(ROOT_PATH, 'sessions')
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-export const TEMPLATE_PATH = join(__dirname, '../../src/template')
+const PROJECT_ROOT = await getProjectRoot()
+export const TEMPLATE_PATH = join(PROJECT_ROOT, 'src', 'template')
 
 /**
  * 统一初始化所有配置和工作区文件

@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { LiteLLMProvider } from '../provider/llm'
-import type { ContextMng } from './context'
-import type { Session, SessionManager } from '../session/manager'
-import type { ToolExecutor } from '../tools/ToolExecutor'
+import type { ContextBuilder } from './context'
+import type { Session, SessionManager, SessionMessage } from '../session/manager'
+import type { ToolExecutor, ToolCall, ToolResult } from '../tools/ToolExecutor'
 import type { Bus } from '../bus/instance'
 import type { AgentConfig } from './types'
 import { RoxyError, ErrorCode } from '../types/errors'
@@ -13,7 +13,7 @@ export interface AgentLoopDeps {
   provider: LiteLLMProvider
   toolExecutor: ToolExecutor
   bus: Bus
-  context: ContextMng
+  context: ContextBuilder
   sessionManager: SessionManager
 }
 
@@ -45,7 +45,7 @@ export class AgentLoop {
   private provider: LiteLLMProvider
   private toolExecutor: ToolExecutor
   private bus: Bus
-  private context: ContextMng
+  private context: ContextBuilder
   private sessionManager: SessionManager
   private session: Session | null = null
 
@@ -67,16 +67,11 @@ export class AgentLoop {
       }
     })
 
-    // 处理 SubAgent 完成事件
     this.bus.on('subagent:complete', async (event) => {
-      // 将 SubAgent 的结果作为系统消息注入到主 Agent 会话
-      // 这会触发主 Agent 重新处理并生成用户友好的响应
-      if (this.session && event.parentSessionId === this.session.id) {
-        // 添加 SubAgent 完成通知到会话
+      if (this.session && event.parentSessionId === this.session.key) {
         this.session.addMessage('assistant', event.result)
-        await this.sessionManager.save(this.session.id)
+        await this.sessionManager.save(this.session)
 
-        // 重新触发 Agent 执行，处理 SubAgent 的结果
         this.bus.emit('agent:execute', {
           taskId: uuidv4().slice(0, 8),
           agentId: this.config.id,
@@ -96,9 +91,13 @@ export class AgentLoop {
 
     this.session = await this.sessionManager.getOrCreate(ctx.sessionId)
     this.session.addMessage('user', ctx.content)
-    await this.sessionManager.save(ctx.sessionId)
+    await this.sessionManager.save(this.session)
 
-    let contextMessages = await this.context.buildContext(this.session.messages)
+    const history = this.session.getHistory()
+    let contextMessages = await this.context.buildMessages(history, ctx.content, {
+      channel: ctx.channelId,
+      chatId: ctx.sessionId,
+    })
     const tools = await this.toolExecutor.getToolDefinitions()
 
     let hasToolCalls = true
@@ -111,6 +110,7 @@ export class AgentLoop {
       if (elapsed >= AgentLoop.MAX_TIME_MS) {
         logError(new RoxyError(ErrorCode.TIMEOUT, 'Timeout exceeded'), 'error', 'AgentLoop')
         this.session.addMessage('assistant', '处理超时')
+        await this.sessionManager.save(this.session)
         break
       }
 
@@ -130,14 +130,13 @@ export class AgentLoop {
 
         const { tool_calls: toolCalls, content } = result.choices?.[0]?.message ?? {}
 
+        this.context.addAssistantMessage(contextMessages, content || '', toolCalls)
         this.session.addMessage('assistant', content || '', toolCalls)
-        await this.sessionManager.save(ctx.sessionId)
+        await this.sessionManager.save(this.session)
 
         aiResponse = content
         toolCallsResult = toolCalls
 
-        // 只有在没有工具调用时才发送 response 事件
-        // 有工具调用时，等待工具执行完成后再发送最终响应
         if (!toolCalls || toolCalls.length === 0) {
           this.bus.emit('agent:response', {
             agentId: ctx.agentId,
@@ -154,7 +153,6 @@ export class AgentLoop {
           hasToolCalls = true
 
           for (const toolCall of toolCalls) {
-            // arguments 可能是对象，需要转换为字符串
             const argsStr =
               typeof toolCall.function.arguments === 'string'
                 ? toolCall.function.arguments
@@ -185,15 +183,17 @@ export class AgentLoop {
           }
 
           const toolResults = await this.toolExecutor.executeTools(
-            toolCalls.map((call) => ({
-              name: call.function.name,
-              // 转换为字符串
-              arguments:
-                typeof call.function.arguments === 'string'
-                  ? call.function.arguments
-                  : JSON.stringify(call.function.arguments),
-              id: call.id,
-            })),
+            toolCalls.map(
+              (call) =>
+                ({
+                  name: call.function.name,
+                  arguments:
+                    typeof call.function.arguments === 'string'
+                      ? call.function.arguments
+                      : JSON.stringify(call.function.arguments),
+                  id: call.id,
+                }) as ToolCall,
+            ),
             { channelId: ctx.channelId, sessionId: ctx.sessionId },
           )
 
@@ -209,11 +209,15 @@ export class AgentLoop {
               timestamp: new Date(),
             })
 
+            this.context.addToolResult(
+              contextMessages,
+              toolResult.tool_call_id,
+              toolResult.name,
+              toolResult.result,
+            )
             this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
-            await this.sessionManager.save(ctx.sessionId)
+            await this.sessionManager.save(this.session)
           }
-
-          contextMessages = await this.context.buildContext(this.session.messages)
         }
       } catch (error) {
         const roxyError =
@@ -226,10 +230,8 @@ export class AgentLoop {
               )
 
         logError(roxyError, 'warn', 'AgentLoop')
-
-        // 所有错误都添加到 session，不直接抛出
         this.session.addMessage('assistant', `抱歉，发生错误：${roxyError.message}`)
-        await this.sessionManager.save(ctx.sessionId)
+        await this.sessionManager.save(this.session)
         break
       }
     }
@@ -237,6 +239,7 @@ export class AgentLoop {
     if (iteration >= AgentLoop.MAX_ITERATIONS && hasToolCalls) {
       log('warn', `Max iterations reached`, 'AgentLoop')
       this.session.addMessage('assistant', '工具调用次数过多')
+      await this.sessionManager.save(this.session)
     }
 
     return { content: aiResponse, toolCalls: toolCallsResult }

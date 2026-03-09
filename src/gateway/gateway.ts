@@ -2,7 +2,7 @@ import { Bus, getBus } from '../bus/instance'
 import { SessionManager } from '../session/manager'
 import { ToolExecutor } from '../tools/ToolExecutor'
 import { AgentLoop } from '../agent/loop'
-import { ContextMng } from '../agent/context'
+import { ContextBuilder } from '../agent/context'
 import { providerManager, OllamaProvider, LiteLLMProvider } from '../provider'
 import type { AgentConfig } from '../agent/types'
 import { AgentRole } from '../agent/types'
@@ -601,7 +601,7 @@ export class RoxyGateway {
       think: config.think ?? globalConfig.agents.defaults.think ?? false,
     }
 
-    const ctx = new ContextMng(this.config.workspace, true)
+    const ctx = new ContextBuilder(this.config.workspace, true)
 
     const agent = new AgentLoop({
       config: agentConfig,

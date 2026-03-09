@@ -93,14 +93,14 @@ export class HeartbeatService {
    * 智能选择心跳通知的目标渠道和会话
    * 优先选择最近更新的非内部会话
    */
-  private pickHeartbeatTarget(): { channelId: string; sessionId: string } {
+  private async pickHeartbeatTarget(): Promise<{ channelId: string; sessionId: string }> {
     // 如果有 ChannelManager，优先使用启用的外部渠道
     if (this.channelManager) {
       const enabledChannels = this.channelManager.enabledChannels
 
       // 如果有 SessionManager，查找最近更新的会话
       if (this.sessionManager) {
-        const sessions = this.sessionManager.listSessions()
+        const sessions = await this.sessionManager.listSessions()
         for (const session of sessions) {
           const key = session.key || ''
           if (!key.includes(':')) continue
@@ -237,7 +237,7 @@ export class HeartbeatService {
         const response = await this.onExecute(tasks)
         if (response && this.onNotify) {
           // 智能选择通知渠道
-          const target = this.pickHeartbeatTarget()
+          const target = await this.pickHeartbeatTarget()
           log(
             'info',
             `Heartbeat: completed, delivering response to ${target.channelId}`,

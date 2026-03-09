@@ -1,4 +1,4 @@
-type Role = 'system' | 'user' | 'assistant' | 'tool'
+import type { Role } from '../session/manager'
 
 interface Message {
   role: Role
