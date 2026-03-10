@@ -1,8 +1,9 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { LiteLLMProvider } from '../provider/llm'
+import type { ChatContext, ChatResponse } from '../provider/base'
+import type { ToolCall } from '../types/global'
 import type { ContextBuilder } from './context'
 import type { Session, SessionManager, SessionMessage } from '../session/manager'
-import type { ToolExecutor, ToolCall, ToolResult } from '../tools/ToolExecutor'
+import type { ToolExecutor, ToolCall as ToolExecutorCall, ToolResult } from '../tools/ToolExecutor'
 import type { Bus } from '../bus/instance'
 import type { AgentConfig } from './types'
 import { RoxyError, ErrorCode } from '../types/errors'
@@ -10,7 +11,7 @@ import { logError, log } from '../utils/error-handler'
 
 export interface AgentLoopDeps {
   config: AgentConfig
-  provider: LiteLLMProvider
+  provider: { cfg: AgentConfig; chat: (ctx: ChatContext) => Promise<ChatResponse> }
   toolExecutor: ToolExecutor
   bus: Bus
   context: ContextBuilder
@@ -42,7 +43,7 @@ export class AgentLoop {
   private static readonly MAX_TIME_MS = 5 * 60 * 1000
 
   private config: AgentConfig
-  private provider: LiteLLMProvider
+  private provider: LLMProvider
   private toolExecutor: ToolExecutor
   private bus: Bus
   private context: ContextBuilder
@@ -58,6 +59,30 @@ export class AgentLoop {
     this.sessionManager = deps.sessionManager
 
     this.setupEventHandlers()
+  }
+
+  /**
+   * 解析工具参数字符串为对象
+   */
+  private parseToolArgs(argsStr: string | object): Record<string, any> {
+    if (typeof argsStr === 'object') {
+      return argsStr as Record<string, any>
+    }
+    return JSON.parse(argsStr)
+  }
+
+  /**
+   * 将工具调用转换为执行格式
+   */
+  private toExecutorCall(toolCall: ToolCall): ToolExecutorCall {
+    return {
+      name: toolCall.function.name,
+      arguments:
+        typeof toolCall.function.arguments === 'string'
+          ? toolCall.function.arguments
+          : JSON.stringify(toolCall.function.arguments),
+      id: toolCall.id,
+    }
   }
 
   private setupEventHandlers(): void {
@@ -91,7 +116,6 @@ export class AgentLoop {
 
     this.session = await this.sessionManager.getOrCreate(ctx.sessionId)
     this.session.addMessage('user', ctx.content)
-    await this.sessionManager.save(this.session)
 
     const history = this.session.getHistory()
     let contextMessages = await this.context.buildMessages(history, ctx.content, {
@@ -105,19 +129,18 @@ export class AgentLoop {
     let aiResponse = ''
     let toolCallsResult: RunResult['toolCalls']
 
-    while (hasToolCalls && iteration < AgentLoop.MAX_ITERATIONS) {
-      const elapsed = Date.now() - startTime
-      if (elapsed >= AgentLoop.MAX_TIME_MS) {
-        logError(new RoxyError(ErrorCode.TIMEOUT, 'Timeout exceeded'), 'error', 'AgentLoop')
-        this.session.addMessage('assistant', '处理超时')
-        await this.sessionManager.save(this.session)
-        break
-      }
+    try {
+      while (hasToolCalls && iteration < AgentLoop.MAX_ITERATIONS) {
+        const elapsed = Date.now() - startTime
+        if (elapsed >= AgentLoop.MAX_TIME_MS) {
+          logError(new RoxyError(ErrorCode.TIMEOUT, 'Timeout exceeded'), 'error', 'AgentLoop')
+          this.session.addMessage('assistant', '处理超时')
+          break
+        }
 
-      iteration++
-      hasToolCalls = false
+        iteration++
+        hasToolCalls = false
 
-      try {
         const result = await this.provider.chat({
           messages: contextMessages,
           model: this.config.model || this.provider.cfg.model,
@@ -132,7 +155,6 @@ export class AgentLoop {
 
         this.context.addAssistantMessage(contextMessages, content || '', toolCalls)
         this.session.addMessage('assistant', content || '', toolCalls)
-        await this.sessionManager.save(this.session)
 
         aiResponse = content
         toolCallsResult = toolCalls
@@ -152,14 +174,10 @@ export class AgentLoop {
         if (toolCalls && toolCalls.length > 0) {
           hasToolCalls = true
 
+          // 发射工具调用事件
           for (const toolCall of toolCalls) {
-            const argsStr =
-              typeof toolCall.function.arguments === 'string'
-                ? toolCall.function.arguments
-                : JSON.stringify(toolCall.function.arguments)
-
             try {
-              const args = JSON.parse(argsStr)
+              const args = this.parseToolArgs(toolCall.function.arguments)
               this.bus.emit('agent:tool_call', {
                 agentId: ctx.agentId,
                 taskId: ctx.taskId,
@@ -182,21 +200,14 @@ export class AgentLoop {
             }
           }
 
-          const toolResults = await this.toolExecutor.executeTools(
-            toolCalls.map(
-              (call) =>
-                ({
-                  name: call.function.name,
-                  arguments:
-                    typeof call.function.arguments === 'string'
-                      ? call.function.arguments
-                      : JSON.stringify(call.function.arguments),
-                  id: call.id,
-                }) as ToolCall,
-            ),
-            { channelId: ctx.channelId, sessionId: ctx.sessionId },
-          )
+          // 执行工具
+          const executorCalls = toolCalls.map((call) => this.toExecutorCall(call))
+          const toolResults = await this.toolExecutor.executeTools(executorCalls, {
+            channelId: ctx.channelId,
+            sessionId: ctx.sessionId,
+          })
 
+          // 处理工具结果
           for (const toolResult of toolResults) {
             this.bus.emit('agent:tool_result', {
               agentId: ctx.agentId,
@@ -216,29 +227,27 @@ export class AgentLoop {
               toolResult.result,
             )
             this.session.addMessage('tool', toolResult.result, toolResult.tool_call_id)
-            await this.sessionManager.save(this.session)
           }
         }
-      } catch (error) {
-        const roxyError =
-          error instanceof RoxyError
-            ? error
-            : new RoxyError(
-                ErrorCode.LLM_API_ERROR,
-                `Iteration ${iteration} failed`,
-                error instanceof Error ? error : undefined,
-              )
-
-        logError(roxyError, 'warn', 'AgentLoop')
-        this.session.addMessage('assistant', `抱歉，发生错误：${roxyError.message}`)
-        await this.sessionManager.save(this.session)
-        break
       }
-    }
 
-    if (iteration >= AgentLoop.MAX_ITERATIONS && hasToolCalls) {
-      log('warn', `Max iterations reached`, 'AgentLoop')
-      this.session.addMessage('assistant', '工具调用次数过多')
+      if (iteration >= AgentLoop.MAX_ITERATIONS && hasToolCalls) {
+        log('warn', `Max iterations reached`, 'AgentLoop')
+        this.session.addMessage('assistant', '工具调用次数过多')
+      }
+    } catch (error) {
+      const roxyError =
+        error instanceof RoxyError
+          ? error
+          : new RoxyError(
+              ErrorCode.LLM_API_ERROR,
+              `Iteration ${iteration} failed`,
+              error instanceof Error ? error : undefined,
+            )
+
+      logError(roxyError, 'warn', 'AgentLoop')
+      this.session.addMessage('assistant', `抱歉，发生错误：${roxyError.message}`)
+    } finally {
       await this.sessionManager.save(this.session)
     }
 

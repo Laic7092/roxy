@@ -8,7 +8,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
-import type { LiteLLMProvider } from '../provider/llm'
+import type LLMProvider from '../provider/base'
 import type { ToolExecutor } from '../tools/ToolExecutor'
 import type { Bus } from '../bus/instance'
 import { log, logError } from '../utils/error-handler'
@@ -43,7 +43,7 @@ export interface SubAgentConfig {
 }
 
 export interface SubAgentManagerDeps {
-  provider: LiteLLMProvider
+  provider: LLMProvider
   bus: Bus
   toolExecutor: ToolExecutor
   config?: SubAgentConfig
@@ -55,7 +55,7 @@ export class SubAgentManager {
   private static readonly DEFAULT_TEMPERATURE = 0.7
   private static readonly DEFAULT_MAX_TOKENS = 4096
 
-  private provider: LiteLLMProvider
+  private provider: LLMProvider
   private bus: Bus
   private toolExecutor: ToolExecutor
   private workspace: string

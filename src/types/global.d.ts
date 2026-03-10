@@ -1,4 +1,9 @@
 import type { Role } from '../session/manager'
+import type { ChatContext, ChatResponse } from '../provider/base'
+
+// 重新导出 Provider 类型
+export type { ChatContext, ChatResponse }
+export type Ctx = ChatContext
 
 interface Message {
   role: Role
@@ -6,12 +11,12 @@ interface Message {
   tool_calls?: ToolCall[]
 }
 
-interface ToolCall {
+export interface ToolCall {
   id: string
   type: 'function'
   function: {
     name: string
-    arguments: string // JSON string
+    arguments: string | object
   }
 }
 
@@ -21,17 +26,7 @@ interface ToolMessage {
   tool_call_id: string
 }
 
-interface Ctx {
-  model: string
-  messages: (Message | ToolMessage)[]
-  stream?: boolean
-  onStreamData?: (data: string) => void
-  tools?: Tool[]
-  tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } }
-  think?: boolean | 'high' | 'medium' | 'low'
-}
-
-interface Tool {
+export interface Tool {
   type: 'function'
   function: {
     name: string

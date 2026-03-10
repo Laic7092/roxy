@@ -5,7 +5,7 @@ export default defineConfig({
     'src/index.ts',
     'src/cli/index.ts',
     'src/agent/loop.ts',
-    'src/provider/llm.ts',
+    'src/provider/openai.ts',
     'src/config/manager.ts',
     'src/tools/ToolExecutor.ts',
     'src/gateway/gateway.ts',

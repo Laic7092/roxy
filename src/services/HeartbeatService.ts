@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { log, logError } from '../utils/error-handler'
 import { RoxyError, ErrorCode } from '../types/errors'
-import type { LiteLLMProvider } from '../provider/llm'
+import type LLMProvider from '../provider/base'
 import type { SessionManager } from '../session/manager'
 import type { ChannelManager } from '../channels/manager'
 
@@ -51,7 +51,7 @@ export interface HeartbeatCallbacks {
 
 export class HeartbeatService {
   private workspace: string
-  private provider: LiteLLMProvider
+  private provider: LLMProvider
   private model: string
   private sessionManager?: SessionManager
   private channelManager?: ChannelManager
@@ -68,7 +68,7 @@ export class HeartbeatService {
 
   constructor(
     workspace: string,
-    provider: LiteLLMProvider,
+    provider: LLMProvider,
     model: string,
     callbacks?: HeartbeatCallbacks,
     config?: HeartbeatServiceConfig,

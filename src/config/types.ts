@@ -20,6 +20,11 @@ import type { AgentConfig } from '../agent/types'
 export interface ProviderConfig {
   apiKey: string
   baseURL: string
+  /** 可选：显式指定 Provider 类型，不填则自动推断 */
+  providerType?: 'openai' | 'ollama'
+  model?: string
+  /** 可选：环境变量名，用于读取 apiKey（优先级高于配置文件） */
+  envName?: string
   [key: string]: any
 }
 
@@ -121,6 +126,10 @@ export interface RoxyConfig {
 
 /**
  * 默认配置
+ *
+ * 内置支持的 LLM 服务商：
+ * - Ollama: 本地运行，使用原生 API
+ * - OpenAI 兼容服务：DeepSeek、Moonshot、零一万物、通义千问等
  */
 export const defaultConfig: RoxyConfig = {
   workspace: join(homedir(), '.roxy', 'workspace'),
@@ -132,11 +141,50 @@ export const defaultConfig: RoxyConfig = {
     },
   },
   providers: {
+    // ========== OpenAI 兼容服务 ==========
+    // 所有 OpenAI 兼容服务自动使用 OpenAIProvider
+    // 格式：model: "<providerId>/<modelName>"
+    // 安全提示：建议使用环境变量存储 API Key
+    // 配置 envName 后，会从环境变量读取 apiKey，优先级高于配置文件
+
     deepseek: {
+      // DeepSeek: https://platform.deepseek.com
       apiKey: '',
       baseURL: 'https://api.deepseek.com',
+      envName: 'DEEPSEEK_API_KEY',
     },
+
+    moonshot: {
+      // Moonshot (Kimi): https://platform.moonshot.cn
+      apiKey: '',
+      baseURL: 'https://api.moonshot.cn/v1',
+      envName: 'MOONSHOT_API_KEY',
+    },
+
+    '01ai': {
+      // 零一万物 (Yi): https://platform.lingyiwanwu.com
+      apiKey: '',
+      baseURL: 'https://api.lingyiwanwu.com/v1',
+      envName: 'YI_API_KEY',
+    },
+
+    qwen: {
+      // 通义千问：https://dashscope.console.aliyun.com
+      apiKey: '',
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      envName: 'DASHSCOPE_API_KEY',
+    },
+
+    openai: {
+      // OpenAI: https://platform.openai.com
+      apiKey: '',
+      baseURL: 'https://api.openai.com/v1',
+      envName: 'OPENAI_API_KEY',
+    },
+
+    // ========== 本地服务 ==========
     ollama: {
+      // Ollama: 本地运行，使用原生 API
       apiKey: 'ollama-local',
       baseURL: 'http://localhost:11434/v1',
     },

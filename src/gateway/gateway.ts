@@ -3,7 +3,7 @@ import { SessionManager } from '../session/manager'
 import { ToolExecutor } from '../tools/ToolExecutor'
 import { AgentLoop } from '../agent/loop'
 import { ContextBuilder } from '../agent/context'
-import { providerManager, OllamaProvider, LiteLLMProvider } from '../provider'
+import { providerManager, OllamaProvider, OpenAIProvider } from '../provider'
 import type { AgentConfig } from '../agent/types'
 import { AgentRole } from '../agent/types'
 import type {
@@ -37,7 +37,7 @@ export class RoxyGateway {
   private readonly sessionManager: SessionManager
   private readonly toolExecutor: ToolExecutor
   private channelManager: ChannelManager | null = null
-  private provider: LiteLLMProvider | null = null
+  private provider: OpenAIProvider | null = null
   private subAgentManager: SubAgentManager | null = null
   private cronService: CronService | null = null
   private heartbeatService: HeartbeatService | null = null
@@ -524,7 +524,7 @@ export class RoxyGateway {
   private async registerAllProviders(): Promise<void> {
     // 注册内置 Providers
     providerManager.registerProvider('ollama', OllamaProvider)
-    providerManager.registerProvider('litellm', LiteLLMProvider)
+    providerManager.registerProvider('openai', OpenAIProvider)
 
     // 从配置加载并配置 Providers
     try {
@@ -695,7 +695,7 @@ export class RoxyGateway {
     return this.toolExecutor
   }
 
-  getProvider(): LiteLLMProvider | null {
+  getProvider(): OpenAIProvider | null {
     return this.provider
   }
 

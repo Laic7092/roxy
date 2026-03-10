@@ -9,7 +9,7 @@ export { ProviderManager, providerManager } from './providerManager'
 
 // Provider 实现
 export { OllamaProvider } from './ollama'
-export { LiteLLMProvider } from './llm'
+export { OpenAIProvider } from './openai'
 
 // 基础类
 export { default as LLMProvider } from './base'
